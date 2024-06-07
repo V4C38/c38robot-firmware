@@ -1,74 +1,141 @@
 #include <AccelStepper.h>
 
 // Define the step and direction pins for the X, Y, Z, and A axes
-#define X_STEP_PIN 2
-#define X_DIR_PIN 5
-#define Y_STEP_PIN 3
-#define Y_DIR_PIN 6
-#define Z_STEP_PIN 4
-#define Z_DIR_PIN 7
-#define A_STEP_PIN 12
-#define A_DIR_PIN 13
+#define STEP_PIN_A 2
+#define DIR_PIN_A 3
+#define STEP_PIN_B 4
+#define DIR_PIN_B 5
+#define STEP_PIN_C 6
+#define DIR_PIN_C 7
+#define STEP_PIN_D 8
+#define DIR_PIN_D 9
+
+// Define the analog pin for the optical sensors
+#define SENSOR_PIN_A1 A1
+#define SENSOR_PIN_A2 A2
+#define SENSOR_PIN_C A3
+#define SENSOR_PIN_D A4
 
 // Create instances of AccelStepper for X, Y, Z, and A axes
-AccelStepper stepperX(AccelStepper::DRIVER, X_STEP_PIN, X_DIR_PIN);
-AccelStepper stepperY(AccelStepper::DRIVER, Y_STEP_PIN, Y_DIR_PIN);
-AccelStepper stepperZ(AccelStepper::DRIVER, Z_STEP_PIN, Z_DIR_PIN);
-AccelStepper stepperA(AccelStepper::DRIVER, A_STEP_PIN, A_DIR_PIN);
+AccelStepper stepperA(AccelStepper::DRIVER, STEP_PIN_A, DIR_PIN_A);
+const int stepsPerRevolution_A = 6400 * 5;
+const int maxHomingSteps_A = (stepsPerRevolution_A / 360.0) * 180; // Steps for 180 degrees
 
-float GlobalMaxSpeed = 250.0; 
-float GlobalAcceleration = 25.0;
-float ContinuousSpeed = 250.0;
-int stepsToMove = 2500;
+AccelStepper stepperB(AccelStepper::DRIVER, STEP_PIN_B, DIR_PIN_B);
+AccelStepper stepperC(AccelStepper::DRIVER, STEP_PIN_C, DIR_PIN_C);
+AccelStepper stepperD(AccelStepper::DRIVER, STEP_PIN_D, DIR_PIN_D);
+
+float GlobalMaxSpeed = 10000.0;
+float GlobalAcceleration = 1000.0;
+float ContinuousSpeed = 500.0;
+int stepsToMove = stepsPerRevolution_A;
 
 unsigned long previousMillis = 0;
 const long interval = 1000;
 bool movingForward = true;
 bool xPaused = false;
 
+// -----------------------------------------------------------------------------------------------------------------------------
+// Setup
+// -----------------------------------------------------------------------------------------------------------------------------
+
 void setup() 
 {
+  // Initialize serial communication
+  Serial.begin(9600);
+  
   // Set max speed and acceleration for the X stepper
-  stepperX.setMaxSpeed(GlobalMaxSpeed);
-  stepperX.setAcceleration(GlobalAcceleration);
+  stepperA.setMaxSpeed(GlobalMaxSpeed);
+  stepperA.setAcceleration(GlobalAcceleration);
 
   // Set speed for continuous movement of Y, Z, and A steppers
-  stepperY.setMaxSpeed(GlobalMaxSpeed);
-  stepperY.setSpeed(ContinuousSpeed);
-  stepperZ.setMaxSpeed(GlobalMaxSpeed);
-  stepperZ.setSpeed(ContinuousSpeed);
-  stepperA.setMaxSpeed(GlobalMaxSpeed);
-  stepperA.setSpeed(ContinuousSpeed);
+  stepperB.setMaxSpeed(GlobalMaxSpeed);
+  stepperB.setSpeed(ContinuousSpeed);
+  stepperC.setMaxSpeed(GlobalMaxSpeed);
+  stepperC.setSpeed(ContinuousSpeed);
+  stepperD.setMaxSpeed(GlobalMaxSpeed);
+  stepperD.setSpeed(ContinuousSpeed);
+  
+  // Perform homing for stepperA
+  homeStepperA();
 }
+
+// -----------------------------------------------------------------------------------------------------------------------------
+// Loop
+// -----------------------------------------------------------------------------------------------------------------------------
 
 void loop() 
 {
   // Get the current time
   unsigned long currentMillis = millis();
 
-  // Manage the X stepper movement with non-blocking delay
+  // Manage the A stepper movement with non-blocking delay
   if (xPaused) {
     if (currentMillis - previousMillis >= interval) {
       xPaused = false;
       previousMillis = currentMillis;
       if (movingForward) {
-        stepperX.moveTo(stepsToMove);
+        stepperA.moveTo(stepsToMove);
         movingForward = false;
       } else {
-        stepperX.moveTo(0);
+        stepperA.moveTo(0);
         movingForward = true;
       }
     }
   } else {
-    if (stepperX.distanceToGo() == 0) {
+    if (stepperA.distanceToGo() == 0) {
       xPaused = true;
       previousMillis = currentMillis;
     }
-    stepperX.run();
+    stepperA.run();
+  }
+  
+  // Run Y, Z, and A steppers continuously
+  stepperB.runSpeed();
+  stepperC.runSpeed();
+  stepperD.runSpeed();
+}
+
+// -----------------------------------------------------------------------------------------------------------------------------
+// Homing
+// -----------------------------------------------------------------------------------------------------------------------------
+void homeStepperA() {
+  Serial.println("Starting homing procedure...");
+  stepperA.setSpeed(GlobalMaxSpeed / 10);
+
+  int DegreesToMove = 0;
+  while (DegreesToMove == 0)
+  {
+    int sensorValueA1 = analogRead(SENSOR_PIN_A1);
+    int sensorValueA2 = analogRead(SENSOR_PIN_A2);
+    
+    stepperA.runSpeed();
+    if (sensorValueA1 <= 100) {   
+      DegreesToMove = 80;
+      break;
+    }
+    if (sensorValueA2 <= 100) {
+      DegreesToMove = -80;
+      break;
+    }
+  }
+  
+  stepperA.move(degreesToSteps(DegreesToMove, stepsPerRevolution_A));
+  while (stepperA.distanceToGo() != 0) {
+    stepperA.run();
   }
 
-  // Run Y, Z, and A steppers continuously
-  stepperY.runSpeed();
-  stepperZ.runSpeed();
-  stepperA.runSpeed();
+  stepperA.setCurrentPosition(0);
+  Serial.println("Homing procedure complete.");
+  return;
+}
+
+
+// -----------------------------------------------------------------------------------------------------------------------------
+// Utility
+// -----------------------------------------------------------------------------------------------------------------------------
+
+// Function to calculate the steps needed for a given amount of degrees
+int degreesToSteps(float degrees, int stepsPerRevolution) {
+  return (degrees / 360.0) * stepsPerRevolution;
 }
