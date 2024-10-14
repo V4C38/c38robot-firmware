@@ -12,13 +12,13 @@ const int Stpr_A_RevSteps = Stpr_A_GearRatio * 800 ; // Microstepping value
 float Stpr_A_MaxSpeed = 5000.0;
 float Stpr_A_Acceleration = 500.0;
 
-#define PIN_STEP_B 4
-#define PIN_DIR_B 5
+#define PIN_STEP_B 52
+#define PIN_DIR_B 53
 AccelStepper Stepper_B(AccelStepper::DRIVER, PIN_STEP_B, PIN_DIR_B);
 const int Stpr_B_GearRatio = 27;
 const int Stpr_B_RevSteps = Stpr_B_GearRatio * 800 ; // Microstepping value
-float Stpr_B_MaxSpeed = 5000.0;
-float Stpr_B_Acceleration = 500.0;
+float Stpr_B_MaxSpeed = 2000.0;
+float Stpr_B_Acceleration = 250.0;
 
 #define PIN_STEP_C 6
 #define PIN_DIR_C 7
@@ -38,14 +38,12 @@ float Stpr_D_Acceleration = 500.0;
 
 
 // -----------------------------------------------------------------------------------------------------------------------------
-// Optical Sensor Pins
+// Sensor Definitions
 // -----------------------------------------------------------------------------------------------------------------------------
-#define PIN_OptSensor_A A1
-#define PIN_OptSensor_B_pos A2
-#define PIN_OptSensor_B_neg A3
-const float OptSensor_B_Treshold = 85.0;
-#define PIN_OptSensor_C A4
-const float OptSensor_C_Treshold = 85.0;
+#define PIN_LIMITSWITCH_A1 A1
+#define PIN_LIMITSWITCH_A2 A2
+#define PIN_LIMITSWITCH_B1 A3
+#define PIN_LIMITSWITCH_C1 A4
 
 
 // =============================================================================================================================
@@ -55,23 +53,28 @@ void setup()
 {
   Serial.begin(9600);
 
+  // Set the limit switch pins as INPUT_PULLUP
+  pinMode(PIN_LIMITSWITCH_A1, INPUT_PULLUP);
+  pinMode(PIN_LIMITSWITCH_A2, INPUT_PULLUP);
+  pinMode(PIN_LIMITSWITCH_B1, INPUT_PULLUP);
+  pinMode(PIN_LIMITSWITCH_C1, INPUT_PULLUP);
 
   // Init Stepper settings
   // Stepper_A.setMaxSpeed(Stpr_A_MaxSpeed);
   // Stepper_A.setAcceleration(Stpr_A_Acceleration);
   Stepper_B.setMaxSpeed(Stpr_B_MaxSpeed);
   Stepper_B.setAcceleration(Stpr_B_Acceleration);
-  Stepper_C.setMaxSpeed(Stpr_C_MaxSpeed);
-  Stepper_C.setAcceleration(Stpr_C_Acceleration);
+  // Stepper_C.setMaxSpeed(Stpr_C_MaxSpeed);
+  // Stepper_C.setAcceleration(Stpr_C_Acceleration);
   // Stepper_D.setMaxSpeed(Stpr_D_MaxSpeed);
   // Stepper_D.setAcceleration(Stpr_D_Acceleration);
 
   
   // Home Steppers in order
-  HomeStepper_D();
-  HomeStepper_C();
-  HomeStepper_B();
-  HomeStepper_A();
+  // HomeStepper_D();
+  // HomeStepper_C();
+  // HomeStepper_B();
+  // HomeStepper_A();
 }
 
 // =============================================================================================================================
@@ -79,18 +82,18 @@ void setup()
 // =============================================================================================================================
 void loop() 
 {
-  delay(1000); // Pauses the program for 1000 milliseconds (1 second)
 
+  // Move motor forward by 1000 steps
+  Stepper_B.move(5000);  // Adjust this value for more/less movement
+  Stepper_B.runToPosition();  // Block until move completes
 
-  int OptSensorVal = analogRead(PIN_OptSensor_C);
-  // Serial.print("Current OptSensor_C Value during loop: ");
-  // Serial.println(OptSensorVal);
-  
-  //Stepper_C.move(degreesToSteps(90, Stpr_C_RevSteps));
-  //while (Stepper_C.distanceToGo() != 0) 
-  //{
-  //  Stepper_C.run();
-  //}
+  delay(1000);  // Pause for 1 second
+
+  // Move motor backward by 1000 steps
+  Stepper_B.move(-1000);  // Adjust this value for more/less movement
+  Stepper_B.runToPosition();  // Block until move completes
+
+  delay(1000);  // Pause for 1 second
 }
 
 
@@ -108,6 +111,7 @@ void HomeStepper_A()
 
 void HomeStepper_B()
 {
+  /*
   Serial.println("Homing Stepper_B.");
   float HomingSpeed = Stpr_B_MaxSpeed / 10;
   Stepper_B.setSpeed(HomingSpeed);
@@ -115,24 +119,23 @@ void HomeStepper_B()
   int DegreesToHomePos = 0;
   while (true)
   {
-    int OptSensorVal_pos = analogRead(PIN_OptSensor_B_pos);
-    int OptSensorVal_neg = analogRead(PIN_OptSensor_B_neg);
+    int OptSensorVal_pos = 0; // analogRead(PIN_OptSensor_B_pos);
+    int OptSensorVal_neg = 0; //analogRead(PIN_OptSensor_B_neg);
 
     Stepper_B.runSpeed();
-    if (OptSensorVal_pos <= OptSensor_B_Treshold) 
+    if (OptSensorVal_pos <= 0) //OptSensor_B_Treshold) 
     {   
       Stepper_B.stop();
       DegreesToHomePos = -20;
       break;
     }
-    if (OptSensorVal_neg <= OptSensor_B_Treshold) 
+    if (OptSensorVal_neg <= 0) //OptSensor_B_Treshold) 
     {   
       Stepper_B.stop();
       DegreesToHomePos = 20;
       break;
     }
   }
-  
   // Then move to the axis center location and assume that as positon 0.
   Stepper_B.move(degreesToSteps(DegreesToHomePos, Stpr_B_RevSteps));
   while (Stepper_B.distanceToGo() != 0) 
@@ -142,11 +145,13 @@ void HomeStepper_B()
   Stepper_B.setCurrentPosition(0);
   Stepper_B.setSpeed(Stpr_B_MaxSpeed);
   Serial.println("Completed: Stepper_B homing.");
+  */
   return;
 }
 
 void HomeStepper_C()
 {
+  /*
   Serial.println("Homing Stepper_C.");
   float HomingSpeed = Stpr_C_MaxSpeed / 3;
   Stepper_C.setSpeed(HomingSpeed);
@@ -154,9 +159,9 @@ void HomeStepper_C()
   // Run Stepper_C until clockwise until it triggers OptSensor_C. 
   while (true)
   {
-    int OptSensorVal = analogRead(PIN_OptSensor_C);
+    int OptSensorVal = 0; //analogRead(PIN_OptSensor_C);
     Stepper_C.runSpeed();
-    if (OptSensorVal <= OptSensor_C_Treshold) {   
+    if (OptSensorVal <= 0) //OptSensor_C_Treshold) {   
       Stepper_C.stop();
       break;
     }
@@ -170,6 +175,8 @@ void HomeStepper_C()
   Stepper_C.setCurrentPosition(0);
   Stepper_C.setSpeed(Stpr_C_MaxSpeed);
   Serial.println("Completed: Stepper_C homing.");
+
+  */
   return;
 }
 
