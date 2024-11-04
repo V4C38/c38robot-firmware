@@ -206,7 +206,7 @@ void loop()
     {
         String command = Serial.readStringUntil('\n');
         command.trim();
-        if (command == "Abort") 
+        if (command == "EmergencyStop") 
         {
             AbortAllCommands();
         }
