@@ -1,4 +1,3 @@
-
 #include <AccelStepper.h>
 
 class StepperMotor 
@@ -10,25 +9,32 @@ public:
     int stepsPerRevolution;
     float maxSpeed;
     float acceleration;
+
     bool isHoming;
+    int* limitPositions;
+
     float stepsToMove;
+    int numLimitPositions;
     
     uint8_t* analogSensorPins;
-    uint8_t* digitalSensorPins;
     int numAnalogSensors;
+    uint8_t* digitalSensorPins;
     int numDigitalSensors;
+    
 
     // Constructor
     StepperMotor(int stepPin, int dirPin, int microstepping, int gearRatio, float maxSpeed, float acceleration,
                  uint8_t* analogSensorPins = nullptr, int numAnalogSensors = 0,
-                 uint8_t* digitalSensorPins = nullptr, int numDigitalSensors = 0)
+                 uint8_t* digitalSensorPins = nullptr, int numDigitalSensors = 0,
+                 int* limitPositions = nullptr, int numLimitPositions = 0)
         : stepper(AccelStepper::DRIVER, stepPin, dirPin),
           microstepping(microstepping),
           gearRatio(gearRatio),
           maxSpeed(maxSpeed),
           acceleration(acceleration),
           numAnalogSensors(numAnalogSensors),
-          numDigitalSensors(numDigitalSensors)
+          numDigitalSensors(numDigitalSensors),
+          numLimitPositions(numLimitPositions)
     {
         stepsPerRevolution = microstepping * gearRatio;
         isHoming = false;
@@ -61,6 +67,20 @@ public:
         {
             this->digitalSensorPins = nullptr;
         }
+
+        // Allocate memory for limit positions
+        if (numLimitPositions > 0 && limitPositions != nullptr)
+        {
+            this->limitPositions = new int[numLimitPositions];
+            for (int i = 0; i < numLimitPositions; ++i)
+            {
+                this->limitPositions[i] = limitPositions[i];
+            }
+        }
+        else
+        {
+            this->limitPositions = nullptr;
+        }
     }
 
     // Destructor to clean up dynamically allocated memory
@@ -68,16 +88,17 @@ public:
     {
         delete[] analogSensorPins;
         delete[] digitalSensorPins;
+        delete[] limitPositions;
     }
 };
 
 // -----------------------------------------------------------------------------------------------------------------------------
 // Stepper Definitions
 // -----------------------------------------------------------------------------------------------------------------------------
-#define NUM_STEPPERS 5
+#define NUM_STEPPERS 6
 StepperMotor steppers[NUM_STEPPERS] = 
 {
-    // Stepper 0 
+    // Stepper Axis 0
     StepperMotor(
         52,             // stepPin
         53,             // dirPin
@@ -85,56 +106,74 @@ StepperMotor steppers[NUM_STEPPERS] =
         1,              // gearRatio
         5000.0,         // maxSpeed
         10000.0,        // acceleration
-        (uint8_t[]){A0}, 1,    // Analog Limit Switch pins
-        nullptr, 0      // No digital sensors
+        nullptr, 0,    // Analog Sensor Pins
+        (uint8_t[]){50, 51}, 2,    // Digital Sensor Pins
+        (int[]){-45, 45}, 2   // Limit positions
     ),
 
-    // Stepper 1
-    StepperMotor(
-        50,             // stepPin
-        51,             // dirPin
-        400,            // microstepping
-        27,             // gearRatio
-        10000.0,        // maxSpeed
-        10000.0,        // acceleration
-        (uint8_t[]){A1, A2}, 2, // Analog Limit Switch pins
-        nullptr, 0      // No digital sensors
-    ),
-
-    // Stepper 2
+    // Stepper Axis 1
     StepperMotor(
         48,             // stepPin
         49,             // dirPin
         400,            // microstepping
-        5,              // gearRatio
-        10000.0,        // maxSpeed
+        1,             // gearRatio
+        5000.0,        // maxSpeed
         10000.0,        // acceleration
-        (uint8_t[]){A3, A4}, 2,    // Analog Limit Switch pins
-        nullptr, 0      // No digital sensors
+        nullptr, 0,    // Analog Sensor Pins
+        (uint8_t[]){46, 47}, 2,    // Digital Sensor Pins
+        (int[]){-45, 45}, 2   // Limit positions
     ),
 
-    // Stepper 3
-    StepperMotor(
-        46,             // stepPin
-        47,             // dirPin
-        400,            // microstepping
-        1,              // gearRatio
-        5000.0,         // maxSpeed
-        10000.0,        // acceleration
-        (uint8_t[]){A5}, 1,    // Analog Limit Switch pins
-        nullptr, 0      // No digital sensors
-    ),
-
-    // Stepper 4
+    // Stepper Axis 2
     StepperMotor(
         44,             // stepPin
         45,             // dirPin
-        1600,           // microstepping
+        400,            // microstepping
         1,              // gearRatio
+        5000.0,        // maxSpeed
+        10000.0,        // acceleration
+        nullptr, 0,    // Analog Sensor Pins
+        (uint8_t[]){42, 43}, 2,    // Digital Sensor Pins
+        (int[]){-45, 45}, 2   // Limit positions
+    ),
+
+    // Stepper Axis 3
+    StepperMotor(
+        40,             // stepPin
+        41,             // dirPin
+        400,            // microstepping
+        5,              // gearRatio
         5000.0,         // maxSpeed
         10000.0,        // acceleration
-        nullptr, 0,     // Analog Limit Switch pins
-        nullptr, 0      // No digital sensors
+        nullptr, 0,    // Analog Sensor Pins
+        (uint8_t[]){38, 39}, 2,    // Digital Sensor Pins
+        (int[]){-45, 45}, 2   // Limit positions
+    ),
+
+    // Stepper Axis 4
+    StepperMotor(
+        36,             // stepPin
+        37,             // dirPin
+        400,           // microstepping
+        26.85,              // gearRatio
+        5000.0,         // maxSpeed
+        10000.0,        // acceleration
+        nullptr, 0,    // Analog Sensor Pins
+        (uint8_t[]){34, 35}, 2,    // Digital Sensor Pins
+        (int[]){-45, 45}, 2   // Limit positions
+    ),
+
+    // Stepper Axis 5
+    StepperMotor(
+        32,             // stepPin
+        33,             // dirPin
+        400,           // microstepping
+        50,              // gearRatio
+        5000.0,         // maxSpeed
+        10000.0,        // acceleration
+        nullptr, 0,    // Analog Sensor Pins
+        (uint8_t[]){30, 31}, 2,    // Digital Sensor Pins
+        (int[]){-45, 45}, 2   // Limit positions
     )
 };
 
@@ -150,14 +189,11 @@ bool isAnyMotorMoving();
 void waitForMovementsComplete();
 void AbortAllCommands();
 
-void RunHomingSequence(int InStepperIndex, bool InHomeAll = false);
-void HomeStepper_0();
-void HomeStepper_1();
-void HomeStepper_2();
-void HomeStepper_3();
-void HomeStepper_4();
+void ExecuteHomingCommand(int InAxisIndex, bool InHomeAll = false);
+void HomeAxis(int InAxisIndex);
 
-void RunTest(int InTestID);
+void ExecuteTestCommand(int InTestID);
+void DefaultTest(int InAxis);
 
 // =============================================================================================================================
 // Setup
@@ -194,6 +230,7 @@ void setup()
 // =============================================================================================================================
 void loop() 
 {
+
     for (int i = 0; i < NUM_STEPPERS; i++) 
     {
         isStepperAtLimit(i);
@@ -206,6 +243,9 @@ void loop()
     {
         String command = Serial.readStringUntil('\n');
         command.trim();
+        Serial.print("Received command: ");
+        Serial.println(command);
+
         if (command == "EmergencyStop") 
         {
             AbortAllCommands();
@@ -218,11 +258,11 @@ void loop()
                 String argument = command.substring(spaceIndex + 1);
                 argument.trim();
                 int testID = argument.toInt();
-                RunTest(testID);
+                ExecuteTestCommand(testID);
             } 
             else 
             {
-                Serial.println("Invalid RunTest command format.");
+                Serial.println("Error: Invalid RunTest command format.");
             }
         }
         else if (command.startsWith("RunHomingSequence")) 
@@ -236,16 +276,17 @@ void loop()
                 int stepperIndex = argument.toInt();
                 bool homeAll = (stepperIndex == -1);
 
-                RunHomingSequence(stepperIndex, homeAll);
+                ExecuteHomingCommand(stepperIndex, homeAll);
             } 
             else 
             {
-                Serial.println("Invalid RunHomingSequence command format.");
+                Serial.println("Error: Invalid RunHomingSequence command format.");
             }
-        } 
+        }
+
         else 
         {
-            Serial.println("Unknown command received.");
+            Serial.println("Error: Unknown command received.");
         }
     }
 }
@@ -325,7 +366,7 @@ void AbortAllCommands()
         motor.stepper.setCurrentPosition(motor.stepper.currentPosition());
     }
 
-    Serial.println("All commands aborted.");
+    Serial.println("All commands aborted - all motor positions have been reset, homing sequence required.");
 }
 
 // -----------------------------------------------------------------------------------------------------------------------------
@@ -436,298 +477,138 @@ int degreesToSteps(float degrees, int stepsPerRevolution)
 // Homing Functions
 // -----------------------------------------------------------------------------------------------------------------------------
 
-void RunHomingSequence(int InStepperIndex, bool InHomeAll)
+void ExecuteHomingCommand(int InAxisIndex, bool InHomeAll)
 {
-    if (InHomeAll || InStepperIndex == -1) 
+    if (InHomeAll || InAxisIndex == -1) 
     {
-        Serial.println("Homing all steppers.");
-        HomeStepper_0();
-        HomeStepper_1();
-        HomeStepper_2();
-        HomeStepper_3();
-        HomeStepper_4();
-        Serial.println("All steppers homed.");
+        Serial.println("Homing all Axes.");
+        HomeAxis(0);
+        HomeAxis(1);
+        HomeAxis(2);
+        HomeAxis(3);
+        HomeAxis(4);
+        HomeAxis(5);
+        Serial.println("All Axes homed.");
     } 
     else 
     {
-        switch (InStepperIndex) 
+        if (InAxisIndex < 0 || InAxisIndex > 5)
         {
-            case 0: HomeStepper_0(); break;
-            case 1: HomeStepper_1(); break;
-            case 2: HomeStepper_2(); break;
-            case 3: HomeStepper_3(); break;
-            case 4: HomeStepper_4(); break;
-            default: Serial.println("Invalid stepper index."); break;
+          Serial.println("Invalid Axis index.");
+          return;
         }
+        HomeAxis(InAxisIndex);
     }
 }
 
-void HomeStepper_0() 
+// HomeAxis: Moves the motor until a limit switch is triggered or timeout occurs.
+// If limit is hit, the motor moves to it´s origin (limit is position defined in the stepper class)
+void HomeAxis(int InAxisIndex) 
 {
-    Serial.println("Homing Stepper 0 - Skipped");
-    return;
+    Serial.println("Homing Axis " + String(InAxisIndex) + ": starting...");
 
-    Serial.println("Homing Stepper 0.");
-    StepperMotor &motor = steppers[0];
+    StepperMotor &motor = steppers[InAxisIndex];
     motor.isHoming = true;
-    float HomingSpeed = motor.maxSpeed / 2;
-    motor.stepper.setSpeed(HomingSpeed);
+    bool foundLimit = false;
+    motor.stepper.setSpeed(motor.maxSpeed / 2);
 
     int DegreesToHomePos = 0;
+
+    unsigned long startTime = millis();
+    const unsigned long timeout = 15000;
+
     while (true) 
     {
         motor.stepper.runSpeed();
-        if (digitalRead(motor.analogSensorPins[0]) == LOW) 
+
+        // Check if any sensor is triggered
+        for (int i = 0; i < motor.numDigitalSensors; i++) 
         {
-            motor.stepper.stop();
-            DegreesToHomePos = -155;
-            Serial.println("Homing Stepper 0: found limit A");
-            break;
+            if (digitalRead(motor.digitalSensorPins[i]) == LOW) 
+            {
+                motor.stepper.stop();
+                if (i < motor.numLimitPositions) 
+                {
+                    DegreesToHomePos = motor.limitPositions[i];
+                }
+                Serial.println("Homing Axis " + String(InAxisIndex) + ": found limit index " + String(i));
+                foundLimit = true;
+                break;
+            }
+        }
+        if (foundLimit) 
+        {
+          break;
+        }
+        
+        // Check for timeout
+        if (millis() - startTime > timeout) 
+        {
+            Serial.println("Homing Axis " + String(InAxisIndex) + ": Error - timeout after " + String(timeout / 1000.0, 2) + " seconds.");
+            motor.isHoming = false;
+            return;
         }
     }
 
     motor.stepper.move(degreesToSteps(DegreesToHomePos, motor.stepsPerRevolution));
+    motor.stepper.setSpeed(motor.maxSpeed);
     while (motor.stepper.distanceToGo() != 0) 
     {
         motor.stepper.run();
     }
     motor.stepper.setCurrentPosition(0);
-    motor.stepper.setSpeed(motor.maxSpeed);
     motor.isHoming = false;
-    Serial.println("Completed: Stepper 0 homing.");
-}
 
-void HomeStepper_1() 
-{
-    Serial.println("Homing Stepper 1.");
-    StepperMotor &motor = steppers[1];
-    motor.isHoming = true;
-    float HomingSpeed = motor.maxSpeed / 3.5;
-    motor.stepper.setSpeed(HomingSpeed);
-
-    int DegreesToHomePos = 0;
-    while (true) 
-    {
-        motor.stepper.runSpeed();
-        if (digitalRead(motor.analogSensorPins[0]) == LOW) 
-        {
-            motor.stepper.stop();
-            DegreesToHomePos = -97;
-            Serial.println("Homing Stepper 1: found limit A");
-            break;
-        }
-        if (digitalRead(motor.analogSensorPins[1]) == LOW) 
-        {
-            motor.stepper.stop();
-            DegreesToHomePos = 102;
-            Serial.println("Homing Stepper 1: found limit B");
-            break;
-        }
-    }
-
-    motor.stepper.move(degreesToSteps(DegreesToHomePos, motor.stepsPerRevolution));
-    while (motor.stepper.distanceToGo() != 0) 
-    {
-        motor.stepper.run();
-    }
-    motor.stepper.setCurrentPosition(0);
-    motor.stepper.setSpeed(motor.maxSpeed);
-    motor.isHoming = false;
-    Serial.println("Completed: Stepper 1 homing.");
-}
-
-// Homing function for Stepper 2
-void HomeStepper_2() 
-{
-    Serial.println("Homing Stepper 2.");
-    StepperMotor &motor = steppers[2];
-    motor.isHoming = true;
-    float HomingSpeed = motor.maxSpeed / 8;
-    motor.stepper.setSpeed(HomingSpeed);
-
-    int DegreesToHomePos = 0;
-    while (true) 
-    {
-        motor.stepper.runSpeed();
-        if (digitalRead(motor.analogSensorPins[0]) == LOW) 
-        {
-            motor.stepper.stop();
-            DegreesToHomePos = -133;
-            Serial.println("Homing Stepper 2: found limit A");
-            break;
-        }
-        if (digitalRead(motor.analogSensorPins[1]) == LOW) 
-        {
-            motor.stepper.stop();
-            DegreesToHomePos = 133;
-            Serial.println("Homing Stepper 2: found limit B");
-            break;
-        }
-    }
-
-    motor.stepper.move(degreesToSteps(DegreesToHomePos, motor.stepsPerRevolution));
-    while (motor.stepper.distanceToGo() != 0) 
-    {
-        motor.stepper.run();
-    }
-    motor.stepper.setCurrentPosition(0);
-    motor.stepper.setSpeed(motor.maxSpeed);
-    motor.isHoming = false;
-    Serial.println("Completed: Stepper 2 homing.");
-}
-
-// Homing function for Stepper 3
-void HomeStepper_3() 
-{
-    Serial.println("Homing Stepper 3.");
-    StepperMotor &motor = steppers[3];
-    motor.isHoming = true;
-    float HomingSpeed = motor.maxSpeed / 2;
-    motor.stepper.setSpeed(HomingSpeed);
-
-    int DegreesToHomePos = 0;
-    while (true) 
-    {
-        motor.stepper.runSpeed();
-        if (digitalRead(motor.analogSensorPins[0]) == LOW) 
-        {
-            motor.stepper.stop();
-            DegreesToHomePos = -170;
-            Serial.println("Homing Stepper 3: found limit A");
-            break;
-        }
-    }
-
-    motor.stepper.move(degreesToSteps(DegreesToHomePos, motor.stepsPerRevolution));
-    while (motor.stepper.distanceToGo() != 0) 
-    {
-        motor.stepper.run();
-    }
-    motor.stepper.setCurrentPosition(0);
-    motor.stepper.setSpeed(motor.maxSpeed);
-    motor.isHoming = false;
-    Serial.println("Completed: Stepper 3 homing.");
-}
-
-// Homing function for Stepper 4
-void HomeStepper_4() 
-{
-    Serial.println("Homing Stepper 4.");
-    Serial.println("Completed: Stepper 4 homing.");
+    Serial.println("Homing Axis " + String(InAxisIndex) + ": completed.");
 }
 
 // -----------------------------------------------------------------------------------------------------------------------------
 // Testing Mode
 // -----------------------------------------------------------------------------------------------------------------------------
-void RunTest(int InTestID) 
+void ExecuteTestCommand(int InTestID) 
 {
     Serial.print("Requested TestID: ");
     Serial.println(InTestID);
 
     switch (InTestID) 
     {
-        case 0:
-        {
-            Serial.println("Running test for Stepper 0.");
-            int Motors_Test_0[] = {0};
-
-            SetAxisAngle(0, 45.0);
-            waitForMotors(Motors_Test_0, 1);
-            SetAxisAngle(0, 0.0);
-            waitForMotors(Motors_Test_0, 1);
-            Serial.println("Test for Stepper 0 completed.");
-            break;
-        }
-
-        case 1:
-        {
-            Serial.println("Running test for Stepper 1.");
-            int Motors_Test_1[] = {1};
-
-            SetAxisAngle(1, 45.0);
-            waitForMotors(Motors_Test_1, 1);
-            SetAxisAngle(1, 0.0);
-            waitForMotors(Motors_Test_1, 1);
-            Serial.println("Test for Stepper 1 completed.");
-            break;
-        }
-
-        case 2:
-        {
-            Serial.println("Running test for Stepper 2.");
-            int Motors_Test_2[] = {2};
-
-            SetAxisAngle(2, 45.0);
-            waitForMotors(Motors_Test_2, 1);
-            SetAxisAngle(2, 0.0);
-            waitForMotors(Motors_Test_2, 1);
-            Serial.println("Test for Stepper 2 completed.");
-            break;
-        }
-
-        case 3:
-        {
-            Serial.println("Running test for Stepper 3.");
-            int Motors_Test_3[] = {3};
-
-            SetAxisAngle(3, 45.0);
-            waitForMotors(Motors_Test_3, 1);
-            SetAxisAngle(3, 0.0);
-            waitForMotors(Motors_Test_3, 1);
-            Serial.println("Test for Stepper 3 completed.");
-            break;
-        }
-
-        case 4:
-        {
-            Serial.println("Running test for Stepper 4.");
-            int Motors_Test_4[] = {4};
-
-            SetAxisAngle(4, 45.0);
-            waitForMotors(Motors_Test_4, 1);
-            SetAxisAngle(4, 0.0);
-            waitForMotors(Motors_Test_4, 1);
-            Serial.println("Test for Stepper 4 completed.");
-            break;
-        }
-
-        case 5:
-        {
-            Serial.println("Running test ID 4 - Jogging 1");
-            int Motors_Jog1[] = {1, 2, 3};
-            
-            SetAxisAngle(1, 25.0);
-            SetAxisAngle(2, 45.0);
-            SetAxisAngle(3, 45.0);
-            waitForMotors(Motors_Jog1, 3);
-
-            SetAxisAngle(1, 35.0);
-            SetAxisAngle(2, -60.0);
-            SetAxisAngle(3, -45.0);
-            waitForMotors(Motors_Jog1, 3);
-
-            SetAxisAngle(1, 55.0);
-            SetAxisAngle(2, -105.0);
-            SetAxisAngle(3, -30.0);
-            waitForMotors(Motors_Jog1, 3);
-
-            SetAxisAngle(1, 0.0);
-            SetAxisAngle(2, 0.0);
-            SetAxisAngle(3, 0.0);
-            waitForMotors(Motors_Jog1, 3);
-
-            SetAxisAngle(1, 0.0);
-            SetAxisAngle(2, 0.0);
-            SetAxisAngle(3, 0.0);
-            waitForMotors(Motors_Jog1, 3);
-
-            Serial.println("Completed test ID 5 - Jogging 1");
-            break;
-        }
-
         case 6:
         {
-            Serial.println("Running test ID 6 - Jogging 2");
+            Serial.println("Running test ID 6 - Jogging 1");
+            int Motors_Jog1[] = {3, 4, 5};
+            
+            SetAxisAngle(3, 25.0);
+            SetAxisAngle(4, 45.0);
+            SetAxisAngle(5, 45.0);
+            waitForMotors(Motors_Jog1, 3);
+
+            SetAxisAngle(3, 35.0);
+            SetAxisAngle(4, -60.0);
+            SetAxisAngle(5, -45.0);
+            waitForMotors(Motors_Jog1, 3);
+
+            SetAxisAngle(3, 55.0);
+            SetAxisAngle(4, -105.0);
+            SetAxisAngle(5, -30.0);
+            waitForMotors(Motors_Jog1, 3);
+
+            SetAxisAngle(3, 0.0);
+            SetAxisAngle(4, 0.0);
+            SetAxisAngle(5, 0.0);
+            waitForMotors(Motors_Jog1, 3);
+
+            SetAxisAngle(3, 0.0);
+            SetAxisAngle(4, 0.0);
+            SetAxisAngle(5, 0.0);
+            waitForMotors(Motors_Jog1, 3);
+
+            Serial.println("Completed test ID 6 - Jogging 1");
+            break;
+        }
+
+        case 7:
+        {
+            Serial.println("Running test ID 7 - Jogging 2");
             int Motors_Jog2[] = {1, 2, 3};
 
             SetAxisAngle(1, 45.0);
@@ -749,13 +630,31 @@ void RunTest(int InTestID)
             SetAxisAngle(3, 0.0);
             waitForMotors(Motors_Jog2, 3);
 
-            Serial.println("Completed test ID 6 - Jogging 2");
+            Serial.println("Completed test ID 7 - Jogging 2");
             break;
         }
 
         default:
-            Serial.println("Invalid stepper index provided.");
+            if (InTestID < 0 || InTestID > 7) 
+            {
+              Serial.println("Invalid TestID " + String(InTestID));
+            }
+            else
+            {
+              DefaultTest(InTestID);
+            }
             break;
     }
 }
 
+void DefaultTest(int InAxis)
+{
+    Serial.println("Test Axis " + String(InAxis) + " started...");
+    int testMotors[] = {InAxis};
+
+    SetAxisAngle(InAxis, 45.0);
+    waitForMotors(testMotors, 1);
+    SetAxisAngle(InAxis, 0.0);
+    waitForMotors(testMotors, 1);
+    Serial.println("Running test for Axis " + String(InAxis) + " completed.");
+}
