@@ -10,6 +10,7 @@ public:
     AccelStepper stepper;
     int microstepping;
     int gearRatio;
+    float stepAngle;
     int stepsPerRevolution;
     float maxSpeed;
     float acceleration;
@@ -23,9 +24,9 @@ public:
     int numDigitalSensors;
     
     // Constructor
-    StepperMotor(int stepPin, int dirPin, int microstepping, int gearRatio, float maxSpeed, float acceleration,
-                 uint8_t* digitalSensorPins = nullptr, int numDigitalSensors = 0,
-                 int* limitPositions = nullptr, int numLimitPositions = 0)
+    StepperMotor(int stepPin, int dirPin, int microstepping, int gearRatio, float stepAngle, 
+                float maxSpeed, float acceleration, uint8_t* digitalSensorPins = nullptr, 
+                int numDigitalSensors = 0, int* limitPositions = nullptr, int numLimitPositions = 0)
         : stepper(AccelStepper::DRIVER, stepPin, dirPin),
           microstepping(microstepping),
           gearRatio(gearRatio),
@@ -34,6 +35,7 @@ public:
           numDigitalSensors(numDigitalSensors),
           numLimitPositions(numLimitPositions)
     {
+
         stepsPerRevolution = microstepping * gearRatio;
         isHoming = false;
         stepsToMove = 0.0;
@@ -86,10 +88,11 @@ StepperMotor steppers[NUM_STEPPERS] =
     StepperMotor(
         52,             // stepPin
         53,             // dirPin
-        800,            // microstepping
-        1,              // gearRatio
+        16000,            // microstepping - this one has 0.094 deg per step so it is x19.14
+        19.203,              // gearRatio
+        0.094,            // stepAngle
         5000.0,         // maxSpeed
-        10000.0,        // acceleration
+        500.0,        // acceleration
         (uint8_t[]){50, 51}, 2,    // Digital Sensor Pins
         (int[]){-45, 45}, 2   // Limit positions
     ),
@@ -99,9 +102,10 @@ StepperMotor steppers[NUM_STEPPERS] =
         48,             // stepPin
         49,             // dirPin
         800,            // microstepping
-        1,             // gearRatio
-        5000.0,        // maxSpeed
-        10000.0,        // acceleration
+        50,             // gearRatio
+        1.8,            // stepAngle
+        50000.0,        // maxSpeed
+        2000.0,        // acceleration
         (uint8_t[]){46, 47}, 2,    // Digital Sensor Pins
         (int[]){-45, 45}, 2   // Limit positions
     ),
@@ -111,9 +115,10 @@ StepperMotor steppers[NUM_STEPPERS] =
         44,             // stepPin
         45,             // dirPin
         800,            // microstepping
-        1,              // gearRatio
-        5000.0,        // maxSpeed
-        10000.0,        // acceleration
+        26.85,          // gearRatio
+        1.8,            // stepAngle
+        50000.0,        // maxSpeed
+        2000.0,        // acceleration
         (uint8_t[]){42, 43}, 2,    // Digital Sensor Pins
         (int[]){-45, 45}, 2   // Limit positions
     ),
@@ -122,10 +127,11 @@ StepperMotor steppers[NUM_STEPPERS] =
     StepperMotor(
         40,             // stepPin
         41,             // dirPin
-        1600,            // microstepping
+        3200,            // microstepping
         5,              // gearRatio
-        5000.0,         // maxSpeed
-        10000.0,        // acceleration
+        1.8,            // stepAngle
+        50000.0,         // maxSpeed
+        2000.0,        // acceleration
         (uint8_t[]){38, 39}, 2,    // Digital Sensor Pins
         (int[]){-45, 45}, 2   // Limit positions
     ),
@@ -134,8 +140,9 @@ StepperMotor steppers[NUM_STEPPERS] =
     StepperMotor(
         36,             // stepPin
         37,             // dirPin
-        800,           // microstepping
-        26.85,          // gearRatio
+        3200,           // microstepping
+        13.73,          // gearRatio
+        0.131,            // stepAngle
         5000.0,         // maxSpeed
         10000.0,        // acceleration
         (uint8_t[]){34, 35}, 2,    // Digital Sensor Pins
@@ -146,8 +153,9 @@ StepperMotor steppers[NUM_STEPPERS] =
     StepperMotor(
         32,             // stepPin
         33,             // dirPin
-        800,           // microstepping
-        50,             // gearRatio
+        400,           // microstepping
+        1.0,             // gearRatio
+        1.8,            // stepAngle
         5000.0,         // maxSpeed
         10000.0,        // acceleration
         (uint8_t[]){30, 31}, 2,    // Digital Sensor Pins
@@ -439,9 +447,8 @@ bool isStepperAtLimit(int stepperIndex)
     return false;
 }
 
-int degreesToSteps(float degrees, int stepsPerRevolution) 
-{
-    return (int)((degrees / 360.0) * stepsPerRevolution);
+int degreesToSteps(float degrees, float stepsPerRev) {
+    return (int)((degrees / 360.0f) * stepsPerRev);
 }
 
 // -----------------------------------------------------------------------------------------------------------------------------
@@ -547,35 +554,56 @@ void ExecuteTestCommand(int InTestID)
 
     switch (InTestID) 
     {
+        case 1:
+        {
+            Serial.println("Running test ID 1 - Constrained Test Axis 1");
+            int Motors_Test1[] = {1};
+
+            SetAxisAngle(1, 15.0);
+            waitForMotors(Motors_Test1, 1);
+            
+            SetAxisAngle(1, 0.0);
+            waitForMotors(Motors_Test1, 1);
+
+            Serial.println("Completed test ID 1 - Constrained Test Axis 1");
+            break;
+        }
         case 6:
         {
             Serial.println("Running test ID 6 - Jogging 1");
-            int Motors_Jog1[] = {3, 4, 5};
+            int Motors_Jog1[] = {0, 1, 2, 3, 4, 5};
             
-            SetAxisAngle(3, 25.0);
+            SetAxisAngle(0, 25.0);
+            SetAxisAngle(1, 25.0);
+            SetAxisAngle(2, 25.0);
+            SetAxisAngle(3, 45.0);
             SetAxisAngle(4, 45.0);
             SetAxisAngle(5, 45.0);
-            waitForMotors(Motors_Jog1, 3);
+            waitForMotors(Motors_Jog1, 6);
 
-            SetAxisAngle(3, 35.0);
+            SetAxisAngle(0, -25.0);
+            SetAxisAngle(1, -25.0);
+            SetAxisAngle(2, -25.0);
+            SetAxisAngle(3, -45.0);
             SetAxisAngle(4, -60.0);
             SetAxisAngle(5, -45.0);
-            waitForMotors(Motors_Jog1, 3);
+            waitForMotors(Motors_Jog1, 6);
 
-            SetAxisAngle(3, 55.0);
+            SetAxisAngle(0, 45.0);
+            SetAxisAngle(1, -35.0);
+            SetAxisAngle(2, 45.0);
+            SetAxisAngle(3, 45.0);
             SetAxisAngle(4, -105.0);
             SetAxisAngle(5, -30.0);
-            waitForMotors(Motors_Jog1, 3);
+            waitForMotors(Motors_Jog1, 6);
 
+            SetAxisAngle(0, 0.0);
+            SetAxisAngle(1, 0.0);
+            SetAxisAngle(2, 0.0);
             SetAxisAngle(3, 0.0);
             SetAxisAngle(4, 0.0);
             SetAxisAngle(5, 0.0);
-            waitForMotors(Motors_Jog1, 3);
-
-            SetAxisAngle(3, 0.0);
-            SetAxisAngle(4, 0.0);
-            SetAxisAngle(5, 0.0);
-            waitForMotors(Motors_Jog1, 3);
+            waitForMotors(Motors_Jog1, 6);
 
             Serial.println("Completed test ID 6 - Jogging 1");
             break;
@@ -584,26 +612,39 @@ void ExecuteTestCommand(int InTestID)
         case 7:
         {
             Serial.println("Running test ID 7 - Jogging 2");
-            int Motors_Jog2[] = {1, 2, 3};
+            int Motors_Jog2[] = {0, 1, 2, 3, 4, 5};
+            
+            SetAxisAngle(0, 0.0);
+            SetAxisAngle(1, -25.0);
+            SetAxisAngle(2, -20.0);
+            SetAxisAngle(3, 45.0);
+            SetAxisAngle(4, 0.0);
+            SetAxisAngle(5, 0.0);
+            waitForMotors(Motors_Jog2, 6);
 
-            SetAxisAngle(1, 45.0);
-            SetAxisAngle(2, 90.0);
-            SetAxisAngle(3, 90.0);
-            waitForMotors(Motors_Jog2, 3);
-
-            delay(1000);
-
+            SetAxisAngle(0, 0.0);
             SetAxisAngle(1, -45.0);
-            SetAxisAngle(2, -90.0);
-            SetAxisAngle(3, -90.0);
-            waitForMotors(Motors_Jog2, 3);
+            SetAxisAngle(2, -25.0);
+            SetAxisAngle(3, 75.0);
+            SetAxisAngle(4, 0.0);
+            SetAxisAngle(5, 0.0);
+            waitForMotors(Motors_Jog2, 6);
 
-            delay(1000);
+            SetAxisAngle(0, 0.0);
+            SetAxisAngle(1, -20.0);
+            SetAxisAngle(2, 35.0);
+            SetAxisAngle(3, -55.0);
+            SetAxisAngle(4, 0.0);
+            SetAxisAngle(5, 0.0);
+            waitForMotors(Motors_Jog2, 6);
 
+            SetAxisAngle(0, 0.0);
             SetAxisAngle(1, 0.0);
             SetAxisAngle(2, 0.0);
             SetAxisAngle(3, 0.0);
-            waitForMotors(Motors_Jog2, 3);
+            SetAxisAngle(4, 0.0);
+            SetAxisAngle(5, 0.0);
+            waitForMotors(Motors_Jog2, 6);
 
             Serial.println("Completed test ID 7 - Jogging 2");
             break;
