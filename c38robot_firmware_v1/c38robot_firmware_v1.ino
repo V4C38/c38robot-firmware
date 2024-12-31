@@ -1,4 +1,6 @@
 #include <AccelStepper.h>
+#include <ArduinoJson.h>
+
 
 // -----------------------------------------------------------------------------------------------------------------------------
 // Stepper Motor Data
@@ -173,6 +175,9 @@ float GetAxisAngleInRadians(int InAxisID);
 void runActiveSteppers();
 bool isAnyMotorMoving();
 void waitForMovementsComplete();
+
+void handleCommand(const String& commandType, const JsonObject& parameters, const JsonObject& responseFormat);
+void sendSerialMessage(const char* type, const char* uuid = nullptr, const char* status = nullptr, const char* message = nullptr, const JsonObject* stateUpdate = nullptr);
 void AbortAllCommands();
 
 void ExecuteHomingCommand(int InAxisIndex, bool InHomeAll = false);
@@ -211,7 +216,6 @@ void setup()
 // =============================================================================================================================
 void loop() 
 {
-
     // Explain
     for (int i = 0; i < NUM_STEPPERS; i++) 
     {
@@ -220,57 +224,129 @@ void loop()
     runActiveSteppers();
 
     // Read Serial Commands
-    if (Serial.available()) 
+    if (Serial.available())
     {
         String command = Serial.readStringUntil('\n');
         command.trim();
-        Serial.print("Received command: ");
+        Serial.print("Received JSON command: ");
         Serial.println(command);
 
-        if (command == "EmergencyStop") 
+        // Parse the JSON
+        StaticJsonDocument<512> doc;
+        DeserializationError error = deserializeJson(doc, command);
+        if (error)
         {
-            AbortAllCommands();
-        }
-        else if (command.startsWith("RunTest")) 
-        {
-            int spaceIndex = command.indexOf(' ');
-            if (spaceIndex != -1) 
-            {
-                String argument = command.substring(spaceIndex + 1);
-                argument.trim();
-                int testID = argument.toInt();
-                ExecuteTestCommand(testID);
-            } 
-            else 
-            {
-                Serial.println("Error: Invalid RunTest command format.");
-            }
-        }
-        else if (command.startsWith("RunHomingSequence")) 
-        {
-            int spaceIndex = command.indexOf(' ');
-            if (spaceIndex != -1) 
-            {
-                String argument = command.substring(spaceIndex + 1);
-                argument.trim();
-
-                int stepperIndex = argument.toInt();
-                bool homeAll = (stepperIndex == -1);
-
-                ExecuteHomingCommand(stepperIndex, homeAll);
-            } 
-            else 
-            {
-                Serial.println("Error: Invalid RunHomingSequence command format.");
-            }
+            Serial.print("JSON Parsing Error: ");
+            Serial.println(error.c_str());
+            return;
         }
 
-        else 
-        {
-            Serial.println("Error: Unknown command received.");
-        }
+        // Extract command and parameters
+        String commandType = doc["command"] | "";
+        JsonObject parameters = doc["parameters"];
+        JsonObject expectedResponse = doc["expectedResponse"];
+
+        // Handle the command
+        handleCommand(commandType, parameters, expectedResponse);
     }
 }
+
+
+// =============================================================================================================================
+// Command handling
+// =============================================================================================================================
+void handleCommand(const String& commandType, const JsonObject& parameters, const JsonObject& responseFormat)
+{
+    String uuid = responseFormat["uuid"] | "";
+
+    String status = "success";
+    String message = "";
+    StaticJsonDocument<256> stateUpdateDoc;
+
+    if (commandType == "EmergencyStop")
+    {
+        AbortAllCommands();
+        message = "Emergency stop executed.";
+    }
+    else if (commandType == "RunTest")
+    {
+        int testID = parameters["testID"] | -1;
+        if (testID != -1)
+        {
+            ExecuteTestCommand(testID);
+            message = "Test " + String(testID) + " completed.";
+        }
+        else
+        {
+            status = "fail";
+            message = "Invalid 'testID' parameter.";
+        }
+    }
+    else if (commandType == "SetAxisAngle")
+    {
+        int axis = parameters["axis"] | -1;
+        float angle = parameters["angle"] | 0.0;
+        if (axis >= 0 && axis < NUM_STEPPERS)
+        {
+            SetAxisAngle(axis, angle);
+            message = "Axis " + String(axis) + " angle set to " + String(angle) + " degrees.";
+
+            JsonObject axes = stateUpdateDoc.createNestedObject("axes");
+            axes[String(axis)] = angle;
+        }
+        else
+        {
+            status = "fail";
+            message = "Invalid axis ID.";
+        }
+    }
+    else if (commandType == "GetState")
+    {
+        JsonObject axes = stateUpdateDoc.createNestedObject("axes");
+        for (int i = 0; i < NUM_STEPPERS; i++)
+        {
+            axes[String(i)] = GetAxisAngle(i);
+        }
+        message = "State retrieved successfully.";
+    }
+    else
+    {
+        status = "fail";
+        message = "Unknown command type.";
+    }
+
+    JsonObject stateUpdate = stateUpdateDoc.isNull() ? JsonObject() : stateUpdateDoc.as<JsonObject>();
+    sendSerialMessage("response", uuid.c_str(), status.c_str(), message.c_str(), stateUpdate.isNull() ? nullptr : &stateUpdate);
+}
+
+
+void sendSerialMessage(const char* type, const char* uuid = nullptr, const char* status = nullptr, const char* message = nullptr, const JsonObject* stateUpdate = nullptr)
+{
+    StaticJsonDocument<512> doc;
+    doc["type"] = type;
+
+    if (uuid != nullptr)
+        doc["uuid"] = uuid;
+
+    if (status != nullptr)
+        doc["status"] = status;
+
+    if (message != nullptr)
+        doc["message"] = message;
+
+    // Add a timestamp (optional, if real-time clock available)
+    doc["timestamp"] = "2024-12-31T12:34:56Z";
+
+    if (stateUpdate != nullptr)
+    {
+        doc["stateUpdate"] = *stateUpdate;
+    }
+
+    String serializedMessage;
+    serializeJson(doc, serializedMessage);
+    Serial.println(serializedMessage);
+}
+
 
 // =============================================================================================================================
 // API
