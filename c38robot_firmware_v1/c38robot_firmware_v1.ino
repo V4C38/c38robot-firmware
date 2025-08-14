@@ -8,6 +8,7 @@
 // -----------------------------------------------------------------------------------------------------------------------------
 class StepperMotor 
 {
+
 public:
     AccelStepper stepper;
     int microstepping;
@@ -90,13 +91,13 @@ StepperMotor steppers[NUM_STEPPERS] =
     StepperMotor(
         52,             // stepPin
         53,             // dirPin
-        16000,            // microstepping - this one has 0.094 deg per step so it is x19.14
-        19.203,              // gearRatio
+        10000,            // microstepping - this one has 0.094 deg per step so it is x19.14
+        19.203,           // gearRatio
         0.094,            // stepAngle
-        5000.0,         // maxSpeed
+        7500.0,         // maxSpeed
         500.0,        // acceleration
         (uint8_t[]){50, 51}, 2,    // Digital Sensor Pins
-        (int[]){-45, 45}, 2   // Limit positions
+        (int[]){-49, 49}, 2   // Limit positions
     ),
 
     // Stepper Axis 1
@@ -109,58 +110,58 @@ StepperMotor steppers[NUM_STEPPERS] =
         50000.0,        // maxSpeed
         2000.0,        // acceleration
         (uint8_t[]){46, 47}, 2,    // Digital Sensor Pins
-        (int[]){-45, 45}, 2   // Limit positions
+        (int[]){-90, 90}, 2   // Limit positions
     ),
 
     // Stepper Axis 2
     StepperMotor(
         44,             // stepPin
         45,             // dirPin
-        800,            // microstepping
+        400,            // microstepping
         26.85,          // gearRatio
         1.8,            // stepAngle
-        50000.0,        // maxSpeed
+        25000.0,        // maxSpeed
         2000.0,        // acceleration
-        (uint8_t[]){42, 43}, 2,    // Digital Sensor Pins
-        (int[]){-45, 45}, 2   // Limit positions
+        (uint8_t[]){43, 42}, 2,    // Digital Sensor Pins
+        (int[]){-110, 100}, 2   // Limit positions
     ),
 
     // Stepper Axis 3
     StepperMotor(
-        40,             // stepPin
-        41,             // dirPin
-        3200,            // microstepping
+        32,             // stepPin
+        33,             // dirPin
+        800,            // microstepping
         5,              // gearRatio
         1.8,            // stepAngle
-        50000.0,         // maxSpeed
-        2000.0,        // acceleration
-        (uint8_t[]){38, 39}, 2,    // Digital Sensor Pins
-        (int[]){-45, 45}, 2   // Limit positions
+        10000.0,         // maxSpeed
+        1500.0,        // acceleration
+        (uint8_t[]){35, 34}, 2,    // Digital Sensor Pins
+        (int[]){-110, 110}, 2   // Limit positions
     ),
 
-    // Stepper Axis 4
+    // Stepper Axis 4 
     StepperMotor(
         36,             // stepPin
         37,             // dirPin
-        3200,           // microstepping
+        2800,           // microstepping
         13.73,          // gearRatio
         0.131,            // stepAngle
-        5000.0,         // maxSpeed
-        10000.0,        // acceleration
-        (uint8_t[]){34, 35}, 2,    // Digital Sensor Pins
-        (int[]){-45, 45}, 2   // Limit positions
+        15000.0,         // maxSpeed
+        1750.0,        // acceleration
+        (uint8_t[]){38}, 1,    // Digital Sensor Pins
+        (int[]){-90, 90}, 2   // Limit positions
     ),
 
     // Stepper Axis 5
     StepperMotor(
-        32,             // stepPin
-        33,             // dirPin
-        400,           // microstepping
+        40,             // stepPin
+        41,             // dirPin
+        800,           // microstepping
         1.0,             // gearRatio
         1.8,            // stepAngle
-        5000.0,         // maxSpeed
-        10000.0,        // acceleration
-        (uint8_t[]){30, 31}, 2,    // Digital Sensor Pins
+        20000.0,         // maxSpeed
+        5000.0,        // acceleration
+        (uint8_t[]){}, 0,    // Digital Sensor Pins
         (int[]){-25, 25}, 2   // Limit positions
     )
 };
@@ -209,14 +210,11 @@ void setup()
         motor.stepper.setAcceleration(motor.acceleration);
     }
 }
-
 // =============================================================================================================================
 // Loop
-// Explain
 // =============================================================================================================================
 void loop() 
 {
-    // Explain
     for (int i = 0; i < NUM_STEPPERS; i++) 
     {
         isStepperAtLimit(i);
@@ -228,26 +226,22 @@ void loop()
     {
         String command = Serial.readStringUntil('\n');
         command.trim();
-        Serial.print("Received JSON command: ");
-        Serial.println(command);
+        if (command.length() == 0) return; // Skip empty messages
 
-        // Parse the JSON
         StaticJsonDocument<512> doc;
         DeserializationError error = deserializeJson(doc, command);
         if (error)
         {
-            Serial.print("JSON Parsing Error: ");
-            Serial.println(error.c_str());
+            sendSerialMessage("response", nullptr, "fail", "Invalid JSON received.");
             return;
         }
 
-        // Extract command and parameters
+        // Process the command
         String commandType = doc["command"] | "";
+        String topLevelUuid = doc["uuid"] | "";  // <--- Added
         JsonObject parameters = doc["parameters"];
         JsonObject expectedResponse = doc["expectedResponse"];
-
-        // Handle the command
-        handleCommand(commandType, parameters, expectedResponse);
+        handleCommand(commandType, parameters, expectedResponse, topLevelUuid); // <--- Added arg
     }
 }
 
@@ -255,22 +249,23 @@ void loop()
 // =============================================================================================================================
 // Command handling
 // =============================================================================================================================
-void handleCommand(const String& commandType, const JsonObject& parameters, const JsonObject& responseFormat)
+void handleCommand(const String& commandType, const JsonObject& parameters, const JsonObject& responseFormat, const String& topLevelUuid)
 {
-    String uuid = responseFormat["uuid"] | "";
-
+    String embeddedUuid = responseFormat["uuid"] | "";
+    String uuid = embeddedUuid.length() > 0 ? embeddedUuid : topLevelUuid;
     String status = "success";
     String message = "";
     StaticJsonDocument<256> stateUpdateDoc;
+    JsonObject stateUpdate = stateUpdateDoc.to<JsonObject>();
 
-    if (commandType == "EmergencyStop")
+    if (commandType == "emergencyStop")
     {
         AbortAllCommands();
         message = "Emergency stop executed.";
     }
-    else if (commandType == "RunTest")
+    else if (commandType == "runTest")
     {
-        int testID = parameters["testID"] | -1;
+        int testID = parameters["testIndex"] | -1;
         if (testID != -1)
         {
             ExecuteTestCommand(testID);
@@ -278,11 +273,11 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
         }
         else
         {
-            status = "fail";
-            message = "Invalid 'testID' parameter.";
+            status = "Error";
+            message = "Invalid 'testIndex' parameter: " + String(testID);
         }
     }
-    else if (commandType == "SetAxisAngle")
+    else if (commandType == "setAxisAngle")
     {
         int axis = parameters["axis"] | -1;
         float angle = parameters["angle"] | 0.0;
@@ -291,53 +286,76 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
             SetAxisAngle(axis, angle);
             message = "Axis " + String(axis) + " angle set to " + String(angle) + " degrees.";
 
-            JsonObject axes = stateUpdateDoc.createNestedObject("axes");
+            JsonObject axes = stateUpdate.createNestedObject("axes");
             axes[String(axis)] = angle;
         }
         else
         {
-            status = "fail";
-            message = "Invalid axis ID.";
+            status = "Error";
+            message = "Invalid axis ID: " + String(axis);
         }
     }
-    else if (commandType == "GetState")
+    else if (commandType == "getState")
     {
-        JsonObject axes = stateUpdateDoc.createNestedObject("axes");
+        JsonObject axes = stateUpdate.createNestedObject("axes");
         for (int i = 0; i < NUM_STEPPERS; i++)
         {
             axes[String(i)] = GetAxisAngle(i);
         }
         message = "State retrieved successfully.";
     }
+    else if (commandType == "homingSequence")
+    {
+        int axis = parameters["axis"] | -1;
+        if (axis < -1 || axis >= NUM_STEPPERS)
+        {
+            status = "Error";
+            message = "Invalid axis ID for homing: " + String(axis);
+        }
+        else
+        {
+            ExecuteHomingCommand(axis, axis == -1);
+            message = (axis == -1) ? "Homing all axes." : ("Homing axis " + String(axis));
+        }
+    }
     else
     {
-        status = "fail";
-        message = "Unknown command type.";
+        status = "Error in handleCommand: ";
+        message = "Unknown command type: " + commandType;
     }
 
-    JsonObject stateUpdate = stateUpdateDoc.isNull() ? JsonObject() : stateUpdateDoc.as<JsonObject>();
-    sendSerialMessage("response", uuid.c_str(), status.c_str(), message.c_str(), stateUpdate.isNull() ? nullptr : &stateUpdate);
+    sendSerialMessage("response",
+                      uuid.length() > 0 ? uuid.c_str() : nullptr,
+                      status.c_str(),
+                      message.c_str(),
+                      stateUpdate.isNull() ? nullptr : &stateUpdate);
 }
 
 
-void sendSerialMessage(const char* type, const char* uuid = nullptr, const char* status = nullptr, const char* message = nullptr, const JsonObject* stateUpdate = nullptr)
+// =============================================================================================================================
+// sendSerialMessage
+// =============================================================================================================================
+void sendSerialMessage(const char* type, const char* uuid, const char* status, const char* message, const JsonObject* stateUpdate)
 {
     StaticJsonDocument<512> doc;
     doc["type"] = type;
 
-    if (uuid != nullptr)
+    if (uuid != nullptr && strlen(uuid) > 0)
+    {
         doc["uuid"] = uuid;
+    }
 
     if (status != nullptr)
+    {
         doc["status"] = status;
+    }
 
     if (message != nullptr)
+    {
         doc["message"] = message;
+    }
 
-    // Add a timestamp (optional, if real-time clock available)
-    doc["timestamp"] = "2024-12-31T12:34:56Z";
-
-    if (stateUpdate != nullptr)
+    if (stateUpdate != nullptr && !stateUpdate->isNull())
     {
         doc["stateUpdate"] = *stateUpdate;
     }
@@ -503,9 +521,12 @@ void waitForMotors(int InMotors[], int InArraySize)
 
 bool isStepperAtLimit(int stepperIndex) 
 {
+    // Disabling all due to magnetic interference on cables in the current build
+    // if (stepperIndex == 3 || stepperIndex == 0) {return;} // These two are giving false positive
+
     if (stepperIndex < 0 || stepperIndex >= NUM_STEPPERS) return false;
     StepperMotor &motor = steppers[stepperIndex];
-
+    
     if (!motor.isHoming) 
     {
         for (int i = 0; i < motor.numDigitalSensors; i++) 
@@ -537,17 +558,16 @@ void ExecuteHomingCommand(int InAxisIndex, bool InHomeAll)
     if (InHomeAll || InAxisIndex == -1) 
     {
         Serial.println("Homing all Axes.");
-        HomeAxis(0);
-        HomeAxis(1);
-        HomeAxis(2);
         HomeAxis(3);
         HomeAxis(4);
-        HomeAxis(5);
+        HomeAxis(2);
+        HomeAxis(1);
+        HomeAxis(0);
         Serial.println("All Axes homed.");
     } 
     else 
     {
-        if (InAxisIndex < -1 || InAxisIndex > NUM_STEPPERS - 1)
+        if (InAxisIndex < 0 || InAxisIndex > NUM_STEPPERS - 1)
         {
           Serial.println("Invalid Axis index.");
           return;
@@ -565,16 +585,51 @@ void HomeAxis(int InAxisIndex)
     StepperMotor &motor = steppers[InAxisIndex];
     motor.isHoming = true;
     bool foundLimit = false;
-    motor.stepper.setSpeed(motor.maxSpeed / 2);
 
     int DegreesToHomePos = 0;
-
     unsigned long startTime = millis();
     const unsigned long timeout = 15000;
 
-    while (true) 
+    // Start moving slowly in one direction to find limit switch
+    // Use the same movement system as SetAxisAngle
+    float homingSpeed = motor.maxSpeed * 0.3;  // Slower speed for homing
+
+    switch (InAxisIndex) {
+        case 0:
+        homingSpeed = homingSpeed * 0.2;
+            SetAxisAngle(InAxisIndex, 180.0);
+            break;
+        case 1:
+            homingSpeed = homingSpeed * 0.15;
+            SetAxisAngle(InAxisIndex, 180.0);
+            break;
+
+        case 2:
+            homingSpeed = homingSpeed * 0.35;
+            SetAxisAngle(InAxisIndex, -180.0);
+            break;
+
+        case 3:
+            SetAxisAngle(InAxisIndex, -180.0);
+            break;
+            
+        case 4:
+            SetAxisAngle(3, -45.0);
+            int axis3Motors[] = {3};
+            waitForMotors(axis3Motors, 1);
+            
+            SetAxisAngle(InAxisIndex, 180.0); 
+            break;
+            
+        default:
+            break;
+    }
+    motor.stepper.setMaxSpeed(homingSpeed);
+
+    while (!foundLimit) 
     {
-        motor.stepper.runSpeed();
+        // Use the same movement system as normal commands
+        runActiveSteppers();
 
         // Check if any sensor is triggered
         for (int i = 0; i < motor.numDigitalSensors; i++) 
@@ -587,13 +642,12 @@ void HomeAxis(int InAxisIndex)
                 }
                 Serial.println("Homing Axis " + String(InAxisIndex) + ": found limit index " + String(i));
                 foundLimit = true;
+                
+                // Stop the motor immediately
+                motor.stepper.stop();
+                motor.stepsToMove = 0.0;
                 break;
             }
-        }
-        if (foundLimit) 
-        {
-          motor.stepper.stop();
-          break;
         }
         
         // Check for timeout
@@ -601,18 +655,40 @@ void HomeAxis(int InAxisIndex)
         {
             Serial.println("Homing Axis " + String(InAxisIndex) + ": Error - timeout after " + String(timeout / 1000.0, 2) + " seconds.");
             motor.stepper.stop();
+            motor.stepsToMove = 0.0;
             motor.isHoming = false;
+            motor.stepper.setMaxSpeed(motor.maxSpeed);  // Restore original speed
             return;
+        }
+
+        // Check if motor stopped moving (might have hit mechanical limit)
+        if (motor.stepper.distanceToGo() == 0 && motor.stepsToMove == 0.0) 
+        {
+            Serial.println("Homing Axis " + String(InAxisIndex) + ": Warning - motor stopped without hitting sensor.");
+            break;
         }
     }
 
-    motor.stepper.move(degreesToSteps(DegreesToHomePos, motor.stepsPerRevolution));
-    while (motor.stepper.distanceToGo() != 0) 
-    {
-        motor.stepper.run();
-    }
+    // Move to the home position using the same movement system
+    motor.stepper.setCurrentPosition(0);  // Set current position as 0 degrees
+    motor.stepper.setMaxSpeed(motor.maxSpeed);  // Restore original speed
+    
+    // Now move to the actual home position
+    SetAxisAngle(InAxisIndex, DegreesToHomePos);
+    
+    // Wait for movement to complete using the same system
+    int homeMotors[] = {InAxisIndex};
+    waitForMotors(homeMotors, 1);
+    
+    // Set this position as the new zero
     motor.stepper.setCurrentPosition(0);
-    motor.stepper.setSpeed(motor.maxSpeed);
+
+    if (InAxisIndex == 4){
+        SetAxisAngle(3, 0.0);
+        int axis3Motors[] = {3};
+        waitForMotors(axis3Motors, 1);
+    }
+
     motor.isHoming = false;
 
     Serial.println("Homing Axis " + String(InAxisIndex) + ": completed.");
@@ -652,24 +728,24 @@ void ExecuteTestCommand(int InTestID)
             SetAxisAngle(0, 25.0);
             SetAxisAngle(1, 25.0);
             SetAxisAngle(2, 25.0);
-            SetAxisAngle(3, 45.0);
-            SetAxisAngle(4, 45.0);
+            SetAxisAngle(3, 0.0);
+            SetAxisAngle(4, 0.0);
             SetAxisAngle(5, 45.0);
             waitForMotors(Motors_Jog1, 6);
 
             SetAxisAngle(0, -25.0);
             SetAxisAngle(1, -25.0);
             SetAxisAngle(2, -25.0);
-            SetAxisAngle(3, -45.0);
-            SetAxisAngle(4, -60.0);
+            SetAxisAngle(3, 0.0);
+            SetAxisAngle(4, 0.0);
             SetAxisAngle(5, -45.0);
             waitForMotors(Motors_Jog1, 6);
 
             SetAxisAngle(0, 45.0);
             SetAxisAngle(1, -35.0);
             SetAxisAngle(2, 45.0);
-            SetAxisAngle(3, 45.0);
-            SetAxisAngle(4, -105.0);
+            SetAxisAngle(3, 0.0);
+            SetAxisAngle(4, 0.0);
             SetAxisAngle(5, -30.0);
             waitForMotors(Motors_Jog1, 6);
 
@@ -690,28 +766,28 @@ void ExecuteTestCommand(int InTestID)
             Serial.println("Running test ID 7 - Jogging 2");
             int Motors_Jog2[] = {0, 1, 2, 3, 4, 5};
             
-            SetAxisAngle(0, 0.0);
+            SetAxisAngle(0, 5.0);
             SetAxisAngle(1, -25.0);
-            SetAxisAngle(2, -20.0);
-            SetAxisAngle(3, 45.0);
-            SetAxisAngle(4, 0.0);
-            SetAxisAngle(5, 0.0);
+            SetAxisAngle(2, -40.0);
+            SetAxisAngle(3, 25.0);
+            SetAxisAngle(4, -15.0);
+            SetAxisAngle(5, 15.0);
             waitForMotors(Motors_Jog2, 6);
 
-            SetAxisAngle(0, 0.0);
+            SetAxisAngle(0, 15.0);
             SetAxisAngle(1, -45.0);
-            SetAxisAngle(2, -25.0);
-            SetAxisAngle(3, 75.0);
-            SetAxisAngle(4, 0.0);
-            SetAxisAngle(5, 0.0);
+            SetAxisAngle(2, -65.0);
+            SetAxisAngle(3, 45.0);
+            SetAxisAngle(4, -35.0);
+            SetAxisAngle(5, -15.0);
             waitForMotors(Motors_Jog2, 6);
 
-            SetAxisAngle(0, 0.0);
-            SetAxisAngle(1, -20.0);
+            SetAxisAngle(0, -10.0);
+            SetAxisAngle(1, -15.0);
             SetAxisAngle(2, 35.0);
-            SetAxisAngle(3, -55.0);
-            SetAxisAngle(4, 0.0);
-            SetAxisAngle(5, 0.0);
+            SetAxisAngle(3, -45.0);
+            SetAxisAngle(4, 35.0);
+            SetAxisAngle(5, 50.0);
             waitForMotors(Motors_Jog2, 6);
 
             SetAxisAngle(0, 0.0);
