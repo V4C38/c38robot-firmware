@@ -1,0 +1,67 @@
+{
+  "armConfig": {
+    "axes": 6
+  },
+  "joints": [
+    {
+      "id": 0,
+      "name": "Joint 0",
+      "theta": 0,
+      "d": 10,
+      "a": 5,
+      "alpha": 90,
+      "minAngle": -130,
+      "maxAngle": 130
+    },
+    {
+      "id": 1,
+      "name": "Joint 1",
+      "theta": 0,
+      "d": 34,
+      "a": 10,
+      "alpha": 0,
+      "minAngle": -110,
+      "maxAngle": 110
+    },
+    {
+      "id": 2,
+      "name": "Joint 2",
+      "theta": 0,
+      "d": 15,
+      "a": 15.5,
+      "alpha": -90,
+      "minAngle": -140,
+      "maxAngle": 140
+    },
+    {
+      "id": 3,
+      "name": "Joint 3",
+      "theta": 0,
+      "d": 15,
+      "a": 15.5,
+      "alpha": 90,
+      "minAngle": -110,
+      "maxAngle": 110
+    },
+    {
+      "id": 4,
+      "name": "Joint 4",
+      "theta": 0,
+      "d": 10,
+      "a": 15,
+      "alpha": 0,
+      "minAngle": -105,
+      "maxAngle": 105
+    },
+    {
+      "id": 5,
+      "name": "Joint 5",
+      "theta": 0,
+      "d": 10.5,
+      "a": 10.8,
+      "alpha": -90,
+      "minAngle": -95,
+      "maxAngle": 95
+    }
+  ]
+}
