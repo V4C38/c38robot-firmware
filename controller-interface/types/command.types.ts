@@ -50,12 +50,14 @@ export interface BaseResponse {
   uuid: string;
   command: string;
   status: 'success' | 'error';
+  message?: string;
   error?: string;
 }
 
 export interface StateUpdateResponse extends BaseResponse {
   stateUpdate?: {
     axes: Record<string, number>;
+    limits?: Record<string, { isAtLimit: boolean; limitIndex: number | null }>;
   };
 }
 
@@ -78,3 +80,56 @@ export interface CommandConfig {
     description: string;
   }>;
 }
+
+// Outgoing on-wire command envelope (host -> firmware)
+export type CommandName =
+  | 'homingSequence'
+  | 'setAxisAngle'
+  | 'getState'
+  | 'emergencyStop'
+  | 'setArmState'
+  | 'runTest';
+
+interface WireCommandBase {
+  type: 'command';
+  uuid: string;
+  command: CommandName;
+}
+
+export interface WireSetAxisAngleCommand extends WireCommandBase {
+  command: 'setAxisAngle';
+  parameters: { axis: number; angle: number };
+}
+
+export interface WireHomingSequenceCommand extends WireCommandBase {
+  command: 'homingSequence';
+  parameters: { axis: number };
+}
+
+export interface WireRunTestCommand extends WireCommandBase {
+  command: 'runTest';
+  parameters: { testIndex: number };
+}
+
+export interface WireEmergencyStopCommand extends WireCommandBase {
+  command: 'emergencyStop';
+  parameters: {};
+}
+
+export interface WireGetStateCommand extends WireCommandBase {
+  command: 'getState';
+  parameters: {};
+}
+
+export interface WireSetArmStateCommand extends WireCommandBase {
+  command: 'setArmState';
+  parameters: { state: unknown };
+}
+
+export type WireCommand =
+  | WireSetAxisAngleCommand
+  | WireHomingSequenceCommand
+  | WireRunTestCommand
+  | WireEmergencyStopCommand
+  | WireGetStateCommand
+  | WireSetArmStateCommand;

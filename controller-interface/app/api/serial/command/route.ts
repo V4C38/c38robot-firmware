@@ -1,17 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import SerialManager from '@/lib/server/SerialManager';
+import type { Command } from '@/types/command.types';
 
 // POST /api/serial/command - Send command to serial port
 export async function POST(request: NextRequest) {
   try {
-    const command = await request.json();
-    
+    const command = await request.json() as Omit<Command, 'uuid' | 'type'>;
+
     const serialManager = SerialManager.getInstance();
-    const sentCommand = await serialManager.sendCommand(command);
-    
-    return NextResponse.json({ success: true, command: sentCommand });
+    // Send and wait for response so clients can immediately update UI state
+    const { command: sentCommand, response } = await serialManager.sendCommandAndWait(command);
+
+    return NextResponse.json({ success: true, command: sentCommand, response });
   } catch (error) {
     console.error('Failed to send command:', error);
+    try {
+      const serialManager = SerialManager.getInstance();
+      await serialManager.appendLog(`API error sending command: ${error instanceof Error ? error.message : 'Unknown error'}`, 'ERROR');
+    } catch {}
     return NextResponse.json({ 
       error: 'Failed to send command',
       message: error instanceof Error ? error.message : 'Unknown error'

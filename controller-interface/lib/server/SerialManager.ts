@@ -12,6 +12,7 @@ class SerialManager extends EventEmitter {
   private serialPort: SerialPort | null = null;
   private serialBuffer: string = '';
   private pendingCommands: Map<string, Command> = new Map();
+  private pendingResponseResolvers: Map<string, (message: BaseResponse) => void> = new Map();
   private commandConfig: CommandConfig | null = null;
   private robotConfig: RobotConfig | null = null;
   private isConnected: boolean = false;
@@ -111,6 +112,16 @@ class SerialManager extends EventEmitter {
     }
   }
 
+  // Clear in-memory and on-disk logs
+  public async clearLogs(): Promise<void> {
+    try {
+      this.logs = [];
+      await fs.writeFile(this.logFile, '');
+    } catch (error) {
+      console.error('Failed to clear logs:', error);
+    }
+  }
+
   private async log(message: string, type: 'INFO' | 'COMMAND' | 'RESPONSE' | 'ERROR' = 'INFO') {
     const timestamp = new Date().toISOString();
     const logEntry = `[${timestamp}] ${type}: ${message}`;
@@ -132,6 +143,11 @@ class SerialManager extends EventEmitter {
     } catch (error) {
       console.error('Failed to write log:', error);
     }
+  }
+
+  // Public logging entrypoint for API routes and other callers
+  public async appendLog(message: string, type: 'INFO' | 'COMMAND' | 'RESPONSE' | 'ERROR' = 'INFO') {
+    await this.log(message, type);
   }
 
   public static getInstance(): SerialManager {
@@ -275,6 +291,9 @@ class SerialManager extends EventEmitter {
         });
       });
 
+      // Give the MCU a brief moment to finish USB CDC setup after port open
+      await new Promise(resolve => setTimeout(resolve, 300));
+
       this.isConnected = true;
       await this.log(`Successfully connected to ${path}`);
       this.emit('connectionChanged', true);
@@ -351,8 +370,9 @@ class SerialManager extends EventEmitter {
       throw new Error('Serial port is not open');
     }
 
+    // Build UI-level command object with uuid (kept for pending map and events)
     const fullCommand: Command = {
-      ...command,
+      ...(command as unknown as Record<string, unknown>),
       type: 'command',
       uuid: uuidv4()
     } as Command;
@@ -360,8 +380,21 @@ class SerialManager extends EventEmitter {
     // Store pending command
     this.pendingCommands.set(fullCommand.uuid, fullCommand);
 
+    // Build standardized on-wire envelope { type, uuid, command, parameters }
+    const commandName = (fullCommand as unknown as { command: string }).command;
+    const parameters = Object.fromEntries(
+      Object.entries(fullCommand as unknown as Record<string, unknown>)
+        .filter(([key]) => key !== 'type' && key !== 'uuid' && key !== 'command')
+    );
+    const wirePayload = {
+      type: 'command',
+      uuid: fullCommand.uuid,
+      command: commandName,
+      parameters
+    };
+
     // Convert to JSON and send
-    const jsonString = JSON.stringify(fullCommand) + '\n';
+    const jsonString = JSON.stringify(wirePayload) + '\r\n';
     
     // Log the command
     await this.log(`Sending command: ${fullCommand.command} ${JSON.stringify(command)}`, 'COMMAND');
@@ -379,15 +412,38 @@ class SerialManager extends EventEmitter {
         }
       });
 
-      // Timeout for pending commands
+      // Timeout for pending commands (allow long-running firmware ops like homing)
+      const TIMEOUT_MS = 60000;
       setTimeout(() => {
         if (this.pendingCommands.has(fullCommand.uuid)) {
           this.pendingCommands.delete(fullCommand.uuid);
           this.log(`Command timeout: ${fullCommand.command}`, 'ERROR');
           reject(new Error(`Command timeout: ${fullCommand.command}`));
         }
-      }, 5000);
+      }, TIMEOUT_MS);
     });
+  }
+
+  // Send command and wait for MCU response for the same UUID
+  public async sendCommandAndWait(
+    command: Omit<Command, 'uuid' | 'type'>,
+    timeoutMs: number = 60000
+  ): Promise<{ command: Command; response: BaseResponse }> {
+    const sent = await this.sendCommand(command);
+    const response = await new Promise<BaseResponse>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingResponseResolvers.delete(sent.uuid);
+        void this.log(`Response timeout: ${sent.command}`, 'ERROR');
+        reject(new Error(`Response timeout: ${sent.command}`));
+      }, timeoutMs);
+
+      this.pendingResponseResolvers.set(sent.uuid, (message: BaseResponse) => {
+        clearTimeout(timer);
+        resolve(message);
+      });
+    });
+
+    return { command: sent, response };
   }
 
   // Handle incoming serial data
@@ -397,14 +453,21 @@ class SerialManager extends EventEmitter {
     // Process complete messages (ended with newline)
     let newlineIndex;
     while ((newlineIndex = this.serialBuffer.indexOf('\n')) !== -1) {
-      const message = this.serialBuffer.substring(0, newlineIndex);
+      let message = this.serialBuffer.substring(0, newlineIndex);
       this.serialBuffer = this.serialBuffer.substring(newlineIndex + 1);
       
       try {
+        // Trim possible CR from Arduino's println ("\r\n") and any surrounding whitespace
+        message = message.replace(/\r+$/, '').trim();
+        if (message.length === 0) {
+          continue;
+        }
+        void this.log(`RX: ${message}`);
         const parsed = JSON.parse(message);
         this.processMessage(parsed);
       } catch (error) {
         console.error('Failed to parse message:', message, error);
+        void this.log(`Parse error for line: ${message}`, 'ERROR');
       }
     }
   }
@@ -415,9 +478,19 @@ class SerialManager extends EventEmitter {
       const pendingCommand = this.pendingCommands.get(message.uuid);
       if (pendingCommand) {
         this.pendingCommands.delete(message.uuid);
-        await this.log(`Received response for command: ${pendingCommand.command} - Status: ${message.status}`, 'RESPONSE');
+        const details = typeof message.message === 'string' && message.message.length > 0
+          ? ` - Message: ${message.message}`
+          : '';
+        await this.log(`Received response for command: ${pendingCommand.command} - Status: ${message.status}${details}`, 'RESPONSE');
       } else {
         await this.log(`Received response: ${JSON.stringify(message)}`, 'RESPONSE');
+      }
+
+      // Resolve any waiter for this response
+      const resolver = this.pendingResponseResolvers.get(message.uuid as string);
+      if (resolver) {
+        this.pendingResponseResolvers.delete(message.uuid as string);
+        resolver(message as BaseResponse);
       }
       this.emit('messageReceived', message as BaseResponse);
     }

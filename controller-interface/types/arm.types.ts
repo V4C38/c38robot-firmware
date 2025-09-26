@@ -14,6 +14,8 @@ export interface JointData {
   dHParameters: DHParameters;
   minAngle: number;
   maxAngle: number;
+  isAtLimit?: boolean;
+  limitIndex?: number | null; // 0 = left, 1 = right, null = none
 }
 
 // Complete arm state

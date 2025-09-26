@@ -1,17 +1,20 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useRobot } from '@/contexts/RobotContext';
 import { Play, RefreshCw, Activity, Bug, Check, Download, Search, Filter } from 'lucide-react';
 import * as Select from '@radix-ui/react-select';
 
 export const TestingTab: React.FC = () => {
   const { isConnected, sendCommand, commandConfig, armState, updateArmState } = useRobot();
-  const [selectedTest, setSelectedTest] = useState<string>('0');
+  const [selectedMode, setSelectedMode] = useState<'single' | 'jog1' | 'jog2'>('single');
+  const [selectedAxis, setSelectedAxis] = useState<string>('0');
   const [isRunningTest, setIsRunningTest] = useState(false);
   const [serialLogs, setSerialLogs] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [logFilter, setLogFilter] = useState<'all' | 'info' | 'command' | 'response' | 'error'>('all');
+  const [logFilter, setLogFilter] = useState<'all' | 'info' | 'command' | 'response' | 'update' | 'error'>('all');
+  const [isTabVisible, setIsTabVisible] = useState(false);
+  const tabRef = useRef<HTMLDivElement>(null);
 
   // Fetch logs from server
   const fetchLogs = async () => {
@@ -26,12 +29,35 @@ export const TestingTab: React.FC = () => {
     }
   };
 
-  // Fetch logs on component mount and every 2 seconds
+  // Track if the Testing tab is visible using Intersection Observer
   useEffect(() => {
-    fetchLogs();
-    const interval = setInterval(fetchLogs, 2000);
-    return () => clearInterval(interval);
+    if (!tabRef.current) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsTabVisible(entry.isIntersecting);
+      },
+      { threshold: 0.1 } // Consider visible if 10% of the tab is visible
+    );
+
+    observer.observe(tabRef.current);
+
+    return () => {
+      observer.disconnect();
+    };
   }, []);
+
+  // Fetch logs only when tab is visible
+  useEffect(() => {
+    if (!isTabVisible) return;
+
+    // Fetch immediately when tab becomes visible
+    fetchLogs();
+
+    // Then poll every 5 seconds while visible
+    const interval = setInterval(fetchLogs, 5000);
+    return () => clearInterval(interval);
+  }, [isTabVisible]);
 
   const handleRunTest = async () => {
     if (!isConnected) {
@@ -40,9 +66,14 @@ export const TestingTab: React.FC = () => {
     }
 
     setIsRunningTest(true);
-    const testIndex = parseInt(selectedTest);
-    
-    const testName = commandConfig?.testSequences.find(t => t.id === testIndex)?.name || 'Unknown Test';
+    let testIndex = 0;
+    if (selectedMode === 'single') {
+      testIndex = parseInt(selectedAxis);
+    } else if (selectedMode === 'jog1') {
+      testIndex = 6;
+    } else {
+      testIndex = 7;
+    }
 
     try {
       await sendCommand({
@@ -80,9 +111,17 @@ export const TestingTab: React.FC = () => {
   };
 
   const handleClearLog = async () => {
-    // Note: This will clear the server log file when implemented
-    // For now, just refresh the logs
-    await fetchLogs();
+    try {
+      const res = await fetch('/api/serial/logs/clear', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setSerialLogs([]);
+      } else {
+        console.error('Failed to clear logs:', data.error);
+      }
+    } catch (error) {
+      console.error('Failed to clear logs:', error);
+    }
   };
 
   const handleDownloadLogs = () => {
@@ -98,6 +137,21 @@ export const TestingTab: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  // Helper function to detect update responses
+  const isUpdateResponse = (log: string) => {
+    return (
+      // RESPONSE logs with getState
+      (log.includes('RESPONSE') && (
+        log.includes('getState') || 
+        log.includes('State retrieved successfully')
+      )) ||
+      // Raw RX logs containing getState response JSON
+      (log.includes('RX:') && log.includes('"command":"getState"')) ||
+      // COMMAND logs sending getState
+      (log.includes('COMMAND') && log.includes('getState'))
+    );
+  };
+
   // Filter and search logs
   const filteredLogs = useMemo(() => {
     let filtered = serialLogs;
@@ -109,7 +163,11 @@ export const TestingTab: React.FC = () => {
           case 'command':
             return log.includes('COMMAND');
           case 'response':
-            return log.includes('RESPONSE');
+            // Exclude update responses from regular response filter
+            return log.includes('RESPONSE') && !isUpdateResponse(log);
+          case 'update':
+            // Show only update responses
+            return isUpdateResponse(log);
           case 'error':
             return log.includes('ERROR');
           case 'info':
@@ -118,6 +176,9 @@ export const TestingTab: React.FC = () => {
             return true;
         }
       });
+    } else {
+      // For 'all' filter, exclude update responses to avoid clutter
+      filtered = filtered.filter(log => !isUpdateResponse(log));
     }
 
     // Apply search filter
@@ -131,7 +192,7 @@ export const TestingTab: React.FC = () => {
   }, [serialLogs, logFilter, searchTerm]);
 
   return (
-    <div className="p-6 space-y-6">
+    <div ref={tabRef} className="p-6 space-y-6">
       <div>
         <h2 className="text-2xl font-bold mb-2 text-black">Testing & Diagnostics</h2>
         <p className="text-gray-600">
@@ -144,36 +205,53 @@ export const TestingTab: React.FC = () => {
         <div className="space-y-4">
           <div className="bg-gray-50 rounded-lg p-4 space-y-4">
             <h3 className="font-medium text-lg text-black">Test Sequences</h3>
-            
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-black">
-                Select Test
-              </label>
-              <Select.Root value={selectedTest} onValueChange={setSelectedTest}>
-                <Select.Trigger className="w-full px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black">
-                  <Select.Value />
-                </Select.Trigger>
-                <Select.Portal>
-                  <Select.Content className="bg-white rounded-md shadow-lg border border-gray-200 mt-1">
-                    <Select.Viewport>
-                      {commandConfig?.testSequences.map((test) => (
-                        <Select.Item
-                          key={test.id}
-                          value={test.id.toString()}
-                          className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-black"
-                        >
-                          <Select.ItemText>
-                            <div>
-                              <div className="font-medium">{test.name}</div>
-                              <div className="text-sm text-gray-600">{test.description}</div>
-                            </div>
-                          </Select.ItemText>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-black">Test Mode</label>
+                <Select.Root value={selectedMode} onValueChange={(v: any) => setSelectedMode(v)}>
+                  <Select.Trigger className="w-full px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black">
+                    <Select.Value />
+                  </Select.Trigger>
+                  <Select.Portal>
+                    <Select.Content className="bg-white rounded-md shadow-lg border border-gray-200 mt-1">
+                      <Select.Viewport>
+                        <Select.Item value="single" className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-black">
+                          <Select.ItemText>Single Axis</Select.ItemText>
                         </Select.Item>
-                      ))}
-                    </Select.Viewport>
-                  </Select.Content>
-                </Select.Portal>
-              </Select.Root>
+                        <Select.Item value="jog1" className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-black">
+                          <Select.ItemText>Jogging 1</Select.ItemText>
+                        </Select.Item>
+                        <Select.Item value="jog2" className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-black">
+                          <Select.ItemText>Jogging 2</Select.ItemText>
+                        </Select.Item>
+                      </Select.Viewport>
+                    </Select.Content>
+                  </Select.Portal>
+                </Select.Root>
+              </div>
+
+              {selectedMode === 'single' && (
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-black">Axis</label>
+                  <Select.Root value={selectedAxis} onValueChange={setSelectedAxis}>
+                    <Select.Trigger className="w-full px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black">
+                      <Select.Value />
+                    </Select.Trigger>
+                    <Select.Portal>
+                      <Select.Content className="bg-white rounded-md shadow-lg border border-gray-200 mt-1">
+                        <Select.Viewport>
+                          {[0,1,2,3,4,5].map((axis) => (
+                            <Select.Item key={axis} value={String(axis)} className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-black">
+                              <Select.ItemText>Axis {axis}</Select.ItemText>
+                            </Select.Item>
+                          ))}
+                        </Select.Viewport>
+                      </Select.Content>
+                    </Select.Portal>
+                  </Select.Root>
+                </div>
+              )}
             </div>
 
             <button
@@ -258,10 +336,10 @@ export const TestingTab: React.FC = () => {
           </div>
         </div>
 
-        {/* Serial Communication Log */}
+        {/* Log */}
         <div className="bg-gray-50 rounded-lg p-4 flex flex-col h-[600px]">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-medium text-lg text-black">Serial Communication Log</h3>
+            <h3 className="font-medium text-lg text-black">Log</h3>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDownloadLogs}
@@ -277,9 +355,9 @@ export const TestingTab: React.FC = () => {
               </button>
               <button
                 onClick={handleClearLog}
-                className="text-sm text-blue-600 hover:text-blue-700"
+                className="px-3 py-1 text-sm rounded bg-red-100 hover:bg-red-200 text-red-700"
               >
-                Refresh
+                Clear
               </button>
             </div>
           </div>
@@ -318,6 +396,9 @@ export const TestingTab: React.FC = () => {
                       <Select.Item value="response" className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-black">
                         <Select.ItemText>Responses</Select.ItemText>
                       </Select.Item>
+                      <Select.Item value="update" className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-black">
+                        <Select.ItemText>Updates</Select.ItemText>
+                      </Select.Item>
                       <Select.Item value="error" className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-black">
                         <Select.ItemText>Errors</Select.ItemText>
                       </Select.Item>
@@ -337,6 +418,7 @@ export const TestingTab: React.FC = () => {
               filteredLogs.slice().reverse().map((entry, index) => (
                 <div key={index} className={`mb-1 ${
                   entry.includes('COMMAND') ? 'text-yellow-400' :
+                  isUpdateResponse(entry) ? 'text-cyan-400' :
                   entry.includes('RESPONSE') ? 'text-blue-400' :
                   entry.includes('ERROR') ? 'text-red-400' :
                   'text-white'

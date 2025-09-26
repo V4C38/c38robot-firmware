@@ -12,6 +12,7 @@ interface RobotContextType {
   isConnected: boolean;
   availablePorts: PortInfo[];
   selectedPort: string | null;
+  baudRate: number;
   
   // Arm state
   armState: ArmState;
@@ -27,11 +28,12 @@ interface RobotContextType {
   
   // Actions
   refreshPorts: () => Promise<void>;
-  connectToPort: (port: string) => Promise<boolean>;
+  connectToPort: (port: string, baudRate?: number) => Promise<boolean>;
   disconnect: () => Promise<void>;
   sendCommand: (command: any) => Promise<void>;
   updateArmState: (updates: Partial<ArmState>) => void;
   setSelectedPort: (port: string | null) => void;
+  setBaudRate: (baud: number) => void;
   updateTargetAngle: (axis: number, angle: number) => void;
   reloadConfig: () => Promise<void>;
 }
@@ -61,6 +63,7 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isConnected, setIsConnected] = useState(false);
   const [availablePorts, setAvailablePorts] = useState<PortInfo[]>([]);
   const [selectedPort, setSelectedPort] = useState<string | null>(null);
+  const [baudRate, setBaudRate] = useState<number>(115200);
   const [armState, setArmState] = useState<ArmState>(defaultArmState);
   const [commandConfig, setCommandConfig] = useState<CommandConfig | null>(null);
   const [robotConfig, setRobotConfig] = useState<RobotConfig | null>(null);
@@ -83,6 +86,11 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const handleMessageReceived = (response: BaseResponse) => {
       if (response.status === 'success' && 'stateUpdate' in response) {
+        const responseCommand = (response as unknown as { command?: string }).command;
+        // Only update current angles from periodic state snapshots
+        if (responseCommand !== 'getState') {
+          return;
+        }
         const stateUpdate = response as StateUpdateResponse;
         if (stateUpdate.stateUpdate?.axes) {
           // Update arm state based on response
@@ -94,8 +102,19 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 newState.joints[axisIndex].currentAngle = angle;
               }
             });
+            // Update limit status if provided
+            if (stateUpdate.stateUpdate?.limits) {
+              Object.entries(stateUpdate.stateUpdate.limits).forEach(([axis, info]) => {
+                const axisIndex = parseInt(axis);
+                if (axisIndex >= 0 && axisIndex < newState.joints.length) {
+                  newState.joints[axisIndex].isAtLimit = info.isAtLimit;
+                  newState.joints[axisIndex].limitIndex = info.limitIndex;
+                }
+              });
+            }
             return newState;
           });
+
         }
       }
     };
@@ -201,13 +220,14 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await serialClient.getAvailablePorts();
   }, []);
 
-  const connectToPort = useCallback(async (port: string) => {
-    const success = await serialClient.openPort(port);
+  const connectToPort = useCallback(async (port: string, requestedBaudRate?: number) => {
+    const baud = requestedBaudRate ?? baudRate;
+    const success = await serialClient.openPort(port, baud);
     if (success) {
       setSelectedPort(port);
     }
     return success;
-  }, []);
+  }, [baudRate]);
 
   const disconnect = useCallback(async () => {
     await serialClient.closePort();
@@ -290,6 +310,7 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     isConnected,
     availablePorts,
     selectedPort,
+    baudRate,
     armState,
     targetAngles,
     commandConfig,
@@ -300,6 +321,7 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     sendCommand,
     updateArmState,
     setSelectedPort: setSelectedPortHandler,
+    setBaudRate,
     updateTargetAngle,
     reloadConfig
   };

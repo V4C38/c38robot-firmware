@@ -1,14 +1,18 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useRobot } from '@/contexts/RobotContext';
 import { AxisSlider } from '@/components/AxisSlider';
-import { Home, AlertTriangle, RotateCcw, ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react';
+import { Home, AlertTriangle, RotateCcw, ChevronDown, ChevronUp, Maximize2, Minimize2, Activity } from 'lucide-react';
 
 export const AxisControlTab: React.FC = () => {
   const { armState, isConnected, sendCommand, targetAngles, updateTargetAngle, robotConfig } = useRobot();
   const [collapsedAxes, setCollapsedAxes] = useState<Set<number>>(new Set());
   const [allCollapsed, setAllCollapsed] = useState(false);
+  const [autoUpdate, setAutoUpdate] = useState(true);
+  const [updateInterval, setUpdateInterval] = useState(1.0);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isPollingRef = useRef(false);
 
   const sendAxisCommand = useCallback(async (axis: number, angle: number) => {
     if (!isConnected) {
@@ -151,6 +155,57 @@ export const AxisControlTab: React.FC = () => {
     }
   };
 
+  const handleGetState = async () => {
+    if (!isConnected) {
+      return;
+    }
+    if (isPollingRef.current) {
+      return;
+    }
+    isPollingRef.current = true;
+    try {
+      await sendCommand({
+        command: 'getState'
+      });
+    } catch (error) {
+      console.error('Failed to send get state command:', error);
+    } finally {
+      isPollingRef.current = false;
+    }
+  };
+
+  // Auto-update effect
+  useEffect(() => {
+    if (autoUpdate && isConnected && updateInterval > 0) {
+      intervalRef.current = setInterval(() => {
+        handleGetState();
+      }, updateInterval * 1000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [autoUpdate, isConnected, updateInterval]);
+
+  const handleAutoUpdateToggle = () => {
+    setAutoUpdate(!autoUpdate);
+  };
+
+  const handleIntervalChange = (value: string) => {
+    const interval = parseFloat(value);
+    if (!isNaN(interval) && interval > 0.1 && interval <= 60) {
+      setUpdateInterval(interval);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -159,6 +214,30 @@ export const AxisControlTab: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-4">
+          {/* Auto-update controls */}
+          <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-md">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={autoUpdate}
+                onChange={handleAutoUpdateToggle}
+                className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-black">Auto Update</span>
+            </label>
+            <input
+              type="number"
+              value={updateInterval.toFixed(1)}
+              onChange={(e) => handleIntervalChange(e.target.value)}
+              min="0.1"
+              max="60"
+              step="0.1"
+              disabled={!autoUpdate}
+              className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded text-black bg-white disabled:bg-gray-200"
+            />
+            <span className="text-xs text-gray-600">s</span>
+          </div>
+          
           <button
             onClick={toggleAllAxes}
             className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-black font-medium rounded-md flex items-center gap-2 transition-colors text-sm"
@@ -264,6 +343,8 @@ export const AxisControlTab: React.FC = () => {
                 onChange={(value) => handleSliderChange(index, value)}
                 onCommit={(value) => handleSliderCommit(index, value)}
                 collapsed={isCollapsed}
+                isAtLimit={joint.isAtLimit}
+                limitIndex={joint.limitIndex}
               />
             </div>
           );
@@ -272,6 +353,19 @@ export const AxisControlTab: React.FC = () => {
 
       {/* Control Buttons */}
       <div className="flex justify-center gap-4 pt-4">
+        <button
+          onClick={handleGetState}
+          disabled={!isConnected}
+          className={`px-6 py-3 font-medium rounded-md transition-colors flex items-center gap-2 ${
+            !isConnected 
+              ? 'bg-gray-300 text-black cursor-not-allowed' 
+              : 'bg-purple-600 hover:bg-purple-700 text-white'
+          }`}
+        >
+          <Activity className="w-4 h-4" />
+          Get State
+        </button>
+        
         <button
           onClick={handleResetAllAngles}
           disabled={!isConnected}

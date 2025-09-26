@@ -13,7 +13,9 @@ export const SerialPortTab: React.FC = () => {
     refreshPorts, 
     connectToPort, 
     disconnect,
-    setSelectedPort 
+    setSelectedPort,
+    baudRate,
+    setBaudRate
   } = useRobot();
   
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -30,14 +32,14 @@ export const SerialPortTab: React.FC = () => {
       await disconnect();
     } else if (selectedPort) {
       setIsConnecting(true);
-      const success = await connectToPort(selectedPort);
+      const success = await connectToPort(selectedPort, baudRate);
       setIsConnecting(false);
       if (!success) {
         // Try force disconnect first, then retry
         try {
           await fetch('/api/serial/force-disconnect', { method: 'POST' });
           await new Promise(resolve => setTimeout(resolve, 1000));
-          const retrySuccess = await connectToPort(selectedPort);
+          const retrySuccess = await connectToPort(selectedPort, baudRate);
           if (!retrySuccess) {
             alert('Failed to connect to serial port. The port may be locked by another application. Try unplugging and reconnecting the device.');
           }
@@ -148,8 +150,28 @@ export const SerialPortTab: React.FC = () => {
         {/* Connection Info */}
         <div className="p-4 bg-blue-50 rounded-lg">
           <h3 className="font-medium text-black mb-2">Connection Settings</h3>
-          <div className="space-y-1 text-sm text-blue-800">
-            <p>Baud Rate: 115200</p>
+          <div className="space-y-3 text-sm text-blue-800">
+            <div>
+              <label className="block text-sm font-medium text-black mb-1">Baud Rate</label>
+              <Select.Root value={String(baudRate)} onValueChange={(v) => setBaudRate(Number(v))}>
+                <Select.Trigger 
+                  className="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
+                >
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Portal>
+                  <Select.Content className="bg-white rounded-md shadow-lg border border-gray-200 mt-1">
+                    <Select.Viewport>
+                      {[9600, 19200, 38400, 57600, 115200, 230400, 250000].map((rate) => (
+                        <Select.Item key={rate} value={String(rate)} className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-black">
+                          <Select.ItemText>{rate}</Select.ItemText>
+                        </Select.Item>
+                      ))}
+                    </Select.Viewport>
+                  </Select.Content>
+                </Select.Portal>
+              </Select.Root>
+            </div>
             <p>Data Bits: 8</p>
             <p>Stop Bits: 1</p>
             <p>Parity: None</p>

@@ -81,18 +81,17 @@ export class SerialClient extends EventEmitter {
     // Only initialize in browser environment
     if (typeof window !== 'undefined') {
       await this.updateStatus();
-      // Start polling for status updates
-      this.startPolling();
+      // No automatic polling - status will be updated on-demand
     }
   }
 
   private startPolling() {
     // Only start polling in browser environment
     if (typeof window !== 'undefined') {
-      // Poll for connection status every 2 seconds
+      // Poll for connection status every 5 seconds (less frequent)
       this.pollInterval = window.setInterval(async () => {
         await this.updateStatus();
-      }, 2000);
+      }, 5000);
     }
   }
 
@@ -132,7 +131,9 @@ export class SerialClient extends EventEmitter {
       const data = await response.json();
       
       if (data.error) {
-        throw new Error(data.error);
+        // Emit error without throwing to avoid breaking UI flows
+        this.emit('error', new Error(data.message || data.error));
+        return;
       }
       
       const ports = data.ports || [];
@@ -159,11 +160,17 @@ export class SerialClient extends EventEmitter {
       const data = await response.json();
       
       if (data.error) {
-        throw new Error(data.error);
+        // Do not throw to avoid breaking UI; emit error for any listeners (e.g., log tab)
+        this.emit('error', new Error(data.message || data.error));
+        return;
       }
       
       this.isConnected = data.connected;
       this.emit('connectionChanged', this.isConnected);
+      
+      // Update status after connection to get configs
+      await this.updateStatus();
+      
       return data.success;
     } catch (error) {
       console.error('Failed to open serial port:', error);
@@ -187,6 +194,9 @@ export class SerialClient extends EventEmitter {
       
       this.isConnected = false;
       this.emit('connectionChanged', false);
+      
+      // Update status after disconnection to clear configs
+      await this.updateStatus();
     } catch (error) {
       console.error('Failed to close serial port:', error);
       this.emit('error', error as Error);
@@ -207,11 +217,18 @@ export class SerialClient extends EventEmitter {
       const data = await response.json();
       
       if (data.error) {
-        throw new Error(data.error);
+        // Emit error without throwing to avoid breaking UI flows
+        this.emit('error', new Error(data.message || data.error));
+        return;
       }
       
       if (data.command) {
         this.emit('commandSent', data.command);
+      }
+
+      // If server returned the MCU response, emit it to subscribers immediately
+      if (data.response) {
+        this.emit('messageReceived', data.response as BaseResponse);
       }
     } catch (error) {
       console.error('Failed to send command:', error);

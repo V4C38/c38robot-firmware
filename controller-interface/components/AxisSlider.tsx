@@ -11,6 +11,8 @@ interface AxisSliderProps {
   onChange: (value: number[]) => void;
   onCommit: (value: number[]) => void;
   collapsed?: boolean;
+  isAtLimit?: boolean;
+  limitIndex?: number | null;
 }
 
 export const AxisSlider: React.FC<AxisSliderProps> = ({
@@ -21,7 +23,9 @@ export const AxisSlider: React.FC<AxisSliderProps> = ({
   fallbackMax,
   onChange,
   onCommit,
-  collapsed = false
+  collapsed = false,
+  isAtLimit,
+  limitIndex
 }) => {
   // Use robot config limits if available, otherwise fall back to joint limits
   const actualMin = robotJoint?.minAngle ?? fallbackMin;
@@ -49,7 +53,7 @@ export const AxisSlider: React.FC<AxisSliderProps> = ({
         
         <div className="relative flex items-center justify-center w-full h-4">
           <div 
-            className="relative bg-gray-200 h-1.5 rounded-full"
+            className={`relative h-1.5 rounded-full ${isAtLimit ? 'bg-red-200' : 'bg-gray-200'}`}
             style={{ width: `${sliderWidthPercent}%` }}
           >
             {/* Center line at 0° */}
@@ -63,7 +67,7 @@ export const AxisSlider: React.FC<AxisSliderProps> = ({
             
             {/* Current value fill from center */}
             <div 
-              className="absolute bg-green-500 h-1.5 rounded-full transition-all duration-300"
+              className={`absolute ${isAtLimit ? 'bg-red-500' : 'bg-green-500'} h-1.5 rounded-full transition-all duration-300`}
               style={{
                 left: currentValue >= 0 
                   ? `${Math.abs(actualMin) / (actualMax - actualMin) * 100}%`
@@ -74,11 +78,16 @@ export const AxisSlider: React.FC<AxisSliderProps> = ({
             
             {/* Current position indicator */}
             <div 
-              className="absolute w-2.5 h-2.5 bg-green-600 border border-white rounded-full shadow-sm transform -translate-y-0.5 transition-all duration-300"
+              className={`absolute w-2.5 h-2.5 ${isAtLimit ? 'bg-red-600' : 'bg-green-600'} border border-white rounded-full shadow-sm transform -translate-y-0.5 transition-all duration-300`}
               style={{
                 left: `calc(${(currentValue - actualMin) / (actualMax - actualMin) * 100}% - 5px)`
               }}
             />
+            {isAtLimit && (
+              <div className="absolute -top-5 text-xs text-red-600">
+                {limitIndex === 0 ? 'Left limit' : limitIndex === 1 ? 'Right limit' : 'Limit'}
+              </div>
+            )}
           </div>
         </div>
         
@@ -101,7 +110,7 @@ export const AxisSlider: React.FC<AxisSliderProps> = ({
         <div className="relative flex items-center justify-center w-full h-4">
           {/* Slider container with dynamic width */}
           <div 
-            className="relative bg-gray-200 h-1.5 rounded-full"
+            className={`relative h-1.5 rounded-full ${isAtLimit ? 'bg-red-200' : 'bg-gray-200'}`}
             style={{ width: `${sliderWidthPercent}%` }}
           >
             {/* Center line at 0° */}
@@ -137,7 +146,7 @@ export const AxisSlider: React.FC<AxisSliderProps> = ({
               <Slider.Track className="relative grow h-1.5 rounded-full bg-transparent">
                 <Slider.Range className="absolute bg-transparent h-full rounded-full" />
               </Slider.Track>
-              <Slider.Thumb className="block w-4 h-4 bg-white border-2 border-blue-500 rounded-full shadow-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              <Slider.Thumb className={`block w-4 h-4 ${isAtLimit ? 'bg-red-500 border-red-600' : 'bg-white border-blue-500'} border-2 rounded-full shadow-md focus:outline-none focus:ring-1 focus:ring-blue-500`} />
             </Slider.Root>
           </div>
         </div>
@@ -156,7 +165,7 @@ export const AxisSlider: React.FC<AxisSliderProps> = ({
         <div className="relative flex items-center justify-center w-full h-4">
           {/* Progress bar container with dynamic width */}
           <div 
-            className="relative bg-gray-200 h-1.5 rounded-full"
+            className={`relative h-1.5 rounded-full ${isAtLimit ? 'bg-red-200' : 'bg-gray-200'}`}
             style={{ width: `${sliderWidthPercent}%` }}
           >
             {/* Center line at 0° */}
@@ -170,7 +179,7 @@ export const AxisSlider: React.FC<AxisSliderProps> = ({
             
             {/* Current value fill from center */}
             <div 
-              className="absolute bg-green-500 h-1.5 rounded-full transition-all duration-300"
+              className={`absolute ${isAtLimit ? 'bg-red-500' : 'bg-green-500'} h-1.5 rounded-full transition-all duration-300`}
               style={{
                 left: currentValue >= 0 
                   ? `${Math.abs(actualMin) / (actualMax - actualMin) * 100}%`
@@ -181,11 +190,16 @@ export const AxisSlider: React.FC<AxisSliderProps> = ({
             
             {/* Current position indicator */}
             <div 
-              className="absolute w-2.5 h-2.5 bg-green-600 border border-white rounded-full shadow-sm transform -translate-y-0.5 transition-all duration-300"
+              className={`absolute w-2.5 h-2.5 ${isAtLimit ? 'bg-red-600' : 'bg-green-600'} border border-white rounded-full shadow-sm transform -translate-y-0.5 transition-all duration-300`}
               style={{
                 left: `calc(${(currentValue - actualMin) / (actualMax - actualMin) * 100}% - 5px)`
               }}
             />
+            {isAtLimit && (
+              <div className="absolute -top-5 text-xs text-red-600">
+                {limitIndex === 0 ? 'Left limit' : limitIndex === 1 ? 'Right limit' : 'Limit'}
+              </div>
+            )}
           </div>
         </div>
         

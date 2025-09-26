@@ -25,6 +25,8 @@ public:
     int numLimitPositions;
     uint8_t* digitalSensorPins;
     int numDigitalSensors;
+    bool atLimit;
+    int lastLimitIndex;
     
     // Constructor
     StepperMotor(int stepPin, int dirPin, int microstepping, int gearRatio, float stepAngle, 
@@ -42,6 +44,8 @@ public:
         stepsPerRevolution = microstepping * gearRatio;
         isHoming = false;
         stepsToMove = 0.0;
+        atLimit = false;
+        lastLimitIndex = -1;
 
         // Allocate memory for digital sensor pins
         if (numDigitalSensors > 0 && digitalSensorPins != nullptr)
@@ -177,8 +181,8 @@ void runActiveSteppers();
 bool isAnyMotorMoving();
 void waitForMovementsComplete();
 
-void handleCommand(const String& commandType, const JsonObject& parameters, const JsonObject& responseFormat);
-void sendSerialMessage(const char* type, const char* uuid = nullptr, const char* status = nullptr, const char* message = nullptr, const JsonObject* stateUpdate = nullptr);
+void handleCommand(const String& commandType, const JsonObject& parameters, const JsonObject& responseFormat, const String& topLevelUuid);
+void sendSerialMessage(const char* type, const char* uuid = nullptr, const char* command = nullptr, const char* status = nullptr, const char* message = nullptr, const JsonObject* stateUpdate = nullptr);
 void AbortAllCommands();
 
 void ExecuteHomingCommand(int InAxisIndex, bool InHomeAll = false);
@@ -192,7 +196,7 @@ void DefaultTest(int InAxis);
 // =============================================================================================================================
 void setup() 
 {
-    Serial.begin(9600);
+    Serial.begin(115200);
 
     // Initialize each stepper motor
     for (int i = 0; i < NUM_STEPPERS; i++) 
@@ -232,7 +236,7 @@ void loop()
         DeserializationError error = deserializeJson(doc, command);
         if (error)
         {
-            sendSerialMessage("response", nullptr, "fail", "Invalid JSON received.");
+            sendSerialMessage("response", nullptr, "unknown", "error", "Invalid JSON received.");
             return;
         }
 
@@ -255,7 +259,7 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
     String uuid = embeddedUuid.length() > 0 ? embeddedUuid : topLevelUuid;
     String status = "success";
     String message = "";
-    StaticJsonDocument<256> stateUpdateDoc;
+    StaticJsonDocument<1024> stateUpdateDoc;
     JsonObject stateUpdate = stateUpdateDoc.to<JsonObject>();
 
     if (commandType == "emergencyStop")
@@ -273,7 +277,7 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
         }
         else
         {
-            status = "Error";
+            status = "error";
             message = "Invalid 'testIndex' parameter: " + String(testID);
         }
     }
@@ -291,7 +295,7 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
         }
         else
         {
-            status = "Error";
+            status = "error";
             message = "Invalid axis ID: " + String(axis);
         }
     }
@@ -302,6 +306,14 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
         {
             axes[String(i)] = GetAxisAngle(i);
         }
+        // Include limit information for each axis
+        JsonObject limits = stateUpdate.createNestedObject("limits");
+        for (int i = 0; i < NUM_STEPPERS; i++)
+        {
+            JsonObject axisLimit = limits.createNestedObject(String(i));
+            axisLimit["isAtLimit"] = steppers[i].atLimit;
+            axisLimit["limitIndex"] = steppers[i].atLimit ? steppers[i].lastLimitIndex : -1;
+        }
         message = "State retrieved successfully.";
     }
     else if (commandType == "homingSequence")
@@ -309,7 +321,7 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
         int axis = parameters["axis"] | -1;
         if (axis < -1 || axis >= NUM_STEPPERS)
         {
-            status = "Error";
+            status = "error";
             message = "Invalid axis ID for homing: " + String(axis);
         }
         else
@@ -320,12 +332,13 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
     }
     else
     {
-        status = "Error in handleCommand: ";
+        status = "error";
         message = "Unknown command type: " + commandType;
     }
 
     sendSerialMessage("response",
                       uuid.length() > 0 ? uuid.c_str() : nullptr,
+                      commandType.c_str(),
                       status.c_str(),
                       message.c_str(),
                       stateUpdate.isNull() ? nullptr : &stateUpdate);
@@ -335,14 +348,19 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
 // =============================================================================================================================
 // sendSerialMessage
 // =============================================================================================================================
-void sendSerialMessage(const char* type, const char* uuid, const char* status, const char* message, const JsonObject* stateUpdate)
+void sendSerialMessage(const char* type, const char* uuid, const char* command, const char* status, const char* message, const JsonObject* stateUpdate)
 {
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<1024> doc;
     doc["type"] = type;
 
     if (uuid != nullptr && strlen(uuid) > 0)
     {
         doc["uuid"] = uuid;
+    }
+
+    if (command != nullptr)
+    {
+        doc["command"] = command;
     }
 
     if (status != nullptr)
@@ -389,6 +407,18 @@ void SetAxisAngle(int InAxisID, float InAngle)
         angleDifference -= 360.0;
     while (angleDifference < -180.0) 
         angleDifference += 360.0;
+
+    // If currently at a limit, prevent further motion into that limit direction
+    if (motor.atLimit)
+    {
+        // Left limit (index 0) => disallow negative movement; Right limit (index 1) => disallow positive movement
+        if ((motor.lastLimitIndex == 0 && angleDifference < 0) ||
+            (motor.lastLimitIndex == 1 && angleDifference > 0))
+        {
+            motor.stepsToMove = 0.0;
+            return;
+        }
+    }
 
     // Convert angle difference to steps and set stepsToMove
     long steps = degreesToSteps(angleDifference, motor.stepsPerRevolution);
@@ -481,6 +511,16 @@ void SafeMoveSteps(int stepperIndex, float steps)
     StepperMotor &motor = steppers[stepperIndex];
     if (isStepperAtLimit(stepperIndex)) return;
 
+    // If currently at a limit, prevent further motion into that limit direction
+    if (motor.atLimit)
+    {
+        if ((motor.lastLimitIndex == 0 && steps < 0) ||
+            (motor.lastLimitIndex == 1 && steps > 0))
+        {
+            return;
+        }
+    }
+
     motor.stepsToMove = steps;
     motor.stepper.move(steps);
 }
@@ -521,9 +561,6 @@ void waitForMotors(int InMotors[], int InArraySize)
 
 bool isStepperAtLimit(int stepperIndex) 
 {
-    // Disabling all due to magnetic interference on cables in the current build
-    // if (stepperIndex == 3 || stepperIndex == 0) {return;} // These two are giving false positive
-
     if (stepperIndex < 0 || stepperIndex >= NUM_STEPPERS) return false;
     StepperMotor &motor = steppers[stepperIndex];
     
@@ -533,14 +570,32 @@ bool isStepperAtLimit(int stepperIndex)
         {
             if (digitalRead(motor.digitalSensorPins[i]) == LOW) 
             {
-                motor.stepper.stop();
-                motor.stepsToMove = 0.0;
-                Serial.print("Digital limit switch hit for Stepper ");
-                Serial.println(stepperIndex);
-                return true;
+                motor.atLimit = true;
+                motor.lastLimitIndex = i;
+
+                // Determine intended movement direction by remaining distance
+                long distanceToGo = motor.stepper.distanceToGo();
+                bool movingNegative = distanceToGo < 0 || motor.stepsToMove < 0;
+                bool movingPositive = distanceToGo > 0 || motor.stepsToMove > 0;
+
+                // If moving further into the triggered limit, stop and block
+                if ((i == 0 && movingNegative) || (i == 1 && movingPositive))
+                {
+                    motor.stepper.stop();
+                    motor.stepsToMove = 0.0;
+                    Serial.print("Digital limit (" );
+                    Serial.print(i);
+                    Serial.print(") blocking inward move for Stepper ");
+                    Serial.println(stepperIndex);
+                    return true;
+                }
+                
+                // Otherwise allow movement away from the limit
+                return false;
             }
         }
     }
+    motor.atLimit = false;
     return false;
 }
 

@@ -12,7 +12,7 @@ import dynamic from 'next/dynamic';
 const RobotArm3D = dynamic(() => import('./RobotArm3D'), { ssr: false });
 
 export const RobotControlInterface: React.FC = () => {
-  const [leftWidth, setLeftWidth] = useState(35); // percentage - give more space to 3D viewer
+  const [leftWidth, setLeftWidth] = useState(60); // percentage - 60% for tabs, 40% for 3D viewer
   const [isResizing, setIsResizing] = useState(false);
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);

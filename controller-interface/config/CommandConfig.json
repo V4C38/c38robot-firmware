@@ -68,18 +68,43 @@
   "testSequences": [
     {
       "id": 0,
-      "name": "Wave Motion",
-      "description": "Simple wave motion test"
+      "name": "Default Test Axis 0",
+      "description": "Move axis 0 to 45° and back"
     },
     {
       "id": 1,
-      "name": "Full Range Test",
-      "description": "Test full range of motion for all axes"
+      "name": "Constrained Test Axis 1",
+      "description": "Special sequence for axis 1"
     },
     {
       "id": 2,
-      "name": "Precision Test",
-      "description": "Test precision movements"
+      "name": "Default Test Axis 2",
+      "description": "Move axis 2 to 45° and back"
+    },
+    {
+      "id": 3,
+      "name": "Default Test Axis 3",
+      "description": "Move axis 3 to 45° and back"
+    },
+    {
+      "id": 4,
+      "name": "Default Test Axis 4",
+      "description": "Move axis 4 to 45° and back"
+    },
+    {
+      "id": 5,
+      "name": "Default Test Axis 5",
+      "description": "Move axis 5 to 45° and back"
+    },
+    {
+      "id": 6,
+      "name": "Jogging 1",
+      "description": "Multi-axis jogging pattern"
+    },
+    {
+      "id": 7,
+      "name": "Jogging 2",
+      "description": "Alternate multi-axis jogging pattern"
     }
   ]
 }

@@ -34,13 +34,13 @@ export const RobotArm3D: React.FC<RobotArm3DProps> = ({
   }, []);
   
 
-  // Mouse controls
+  // Mouse controls - initialize with 45° downward angle
   const mouseRef = useRef({
     isDown: false,
     prevX: 0,
     prevY: 0,
-    rotationX: 0,
-    rotationY: 0
+    rotationX: Math.PI / 4, // 45° downward angle
+    rotationY: Math.PI / 4  // 45° around Y axis
   });
 
   useEffect(() => {
@@ -64,7 +64,8 @@ export const RobotArm3D: React.FC<RobotArm3DProps> = ({
 
     // Camera setup
     const camera = new THREE.PerspectiveCamera(75, actualWidth / actualHeight, 0.1, 1000);
-    camera.position.set(50, 50, 50);
+    // Position camera at elevated position looking down at 45° angle
+    camera.position.set(60, 60, 60);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
@@ -218,20 +219,30 @@ export const RobotArm3D: React.FC<RobotArm3DProps> = ({
         const newWidth = rect.width;
         const newHeight = rect.height;
         
-        
-        // Update renderer size
-        renderer.setSize(newWidth, newHeight);
-        
-        // Update camera aspect ratio
-        camera.aspect = newWidth / newHeight;
-        camera.updateProjectionMatrix();
+        // Only resize if dimensions have actually changed
+        if (newWidth > 0 && newHeight > 0) {
+          // Update renderer size
+          renderer.setSize(newWidth, newHeight);
+          
+          // Update camera aspect ratio
+          camera.aspect = newWidth / newHeight;
+          camera.updateProjectionMatrix();
+        }
       }
     };
 
-    // Listen to window resize
+    // Use ResizeObserver to watch container size changes (better than window resize)
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+
+    resizeObserver.observe(containerRef.current);
+
+    // Also listen to window resize as fallback
     window.addEventListener('resize', handleResize);
 
     return () => {
+      resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
     };
   }, [isInitialized]);
