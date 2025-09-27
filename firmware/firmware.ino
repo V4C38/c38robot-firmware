@@ -20,6 +20,9 @@ public:
 
     bool isHoming;
     float stepsToMove;
+    
+    // Pre-computed constant for angle conversions
+    float stepsPerDegree;
 
     int* limitPositions;
     int numLimitPositions;
@@ -42,6 +45,7 @@ public:
     {
 
         stepsPerRevolution = microstepping * gearRatio;
+        stepsPerDegree = stepsPerRevolution / 360.0;
         isHoming = false;
         stepsToMove = 0.0;
         atLimit = false;
@@ -191,6 +195,51 @@ void HomeAxis(int InAxisIndex);
 void ExecuteTestCommand(int InTestID);
 void DefaultTest(int InAxis);
 
+// Streaming state update settings
+bool g_StateStreamEnabled = true;
+unsigned long g_StateIntervalMs = 200; // default publish interval
+unsigned long g_LastStatePublishMs = 0;
+
+void PublishStateUpdate();
+
+// Debug print guard (set to true to enable verbose prints)
+bool g_DebugSerial = false;
+
+// -----------------------------------------------------------------------------------------------------------------------------
+// Non-blocking serial receive line buffer
+// -----------------------------------------------------------------------------------------------------------------------------
+static const int RX_BUFFER_SIZE = 512;
+char g_RxBuffer[RX_BUFFER_SIZE];
+int g_RxLen = 0;
+
+bool ReadSerialLine(String &outLine)
+{
+    while (Serial.available() > 0)
+    {
+        int ch = Serial.read();
+        if (ch < 0) break;
+        if (ch == '\r') continue; // ignore CR
+        if (ch == '\n')
+        {
+            // complete line
+            g_RxBuffer[g_RxLen] = '\0';
+            outLine = String(g_RxBuffer);
+            g_RxLen = 0;
+            return true;
+        }
+        if (g_RxLen < RX_BUFFER_SIZE - 1)
+        {
+            g_RxBuffer[g_RxLen++] = (char)ch;
+        }
+        else
+        {
+            // overflow: reset buffer
+            g_RxLen = 0;
+        }
+    }
+    return false;
+}
+
 // =============================================================================================================================
 // Setup
 // =============================================================================================================================
@@ -225,27 +274,39 @@ void loop()
     }
     runActiveSteppers();
 
-    // Read Serial Commands
-    if (Serial.available())
+    // Read Serial Commands (non-blocking)
+    String commandLine;
+    if (ReadSerialLine(commandLine))
     {
-        String command = Serial.readStringUntil('\n');
-        command.trim();
-        if (command.length() == 0) return; // Skip empty messages
-
-        StaticJsonDocument<512> doc;
-        DeserializationError error = deserializeJson(doc, command);
-        if (error)
+        commandLine.trim();
+        if (commandLine.length() > 0)
         {
-            sendSerialMessage("response", nullptr, "unknown", "error", "Invalid JSON received.");
-            return;
+            StaticJsonDocument<512> doc;
+            DeserializationError error = deserializeJson(doc, commandLine);
+            if (error)
+            {
+                sendSerialMessage("response", nullptr, "unknown", "error", "Invalid JSON received.");
+            }
+            else
+            {
+                String commandType = doc["command"] | "";
+                String topLevelUuid = doc["uuid"] | "";
+                JsonObject parameters = doc["parameters"];
+                JsonObject expectedResponse = doc["expectedResponse"];
+                handleCommand(commandType, parameters, expectedResponse, topLevelUuid);
+            }
         }
+    }
 
-        // Process the command
-        String commandType = doc["command"] | "";
-        String topLevelUuid = doc["uuid"] | "";  // <--- Added
-        JsonObject parameters = doc["parameters"];
-        JsonObject expectedResponse = doc["expectedResponse"];
-        handleCommand(commandType, parameters, expectedResponse, topLevelUuid); // <--- Added arg
+    // Periodic state streaming (non-blocking)
+    if (g_StateStreamEnabled) 
+    {
+        unsigned long now = millis();
+        if (now - g_LastStatePublishMs >= g_StateIntervalMs) 
+        {
+            PublishStateUpdate();
+            g_LastStatePublishMs = now;
+        }
     }
 }
 
@@ -289,9 +350,7 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
         {
             SetAxisAngle(axis, angle);
             message = "Axis " + String(axis) + " angle set to " + String(angle) + " degrees.";
-
-            JsonObject axes = stateUpdate.createNestedObject("axes");
-            axes[String(axis)] = angle;
+            // Intentionally omit stateUpdate payload here to avoid extra work in the motion path.
         }
         else
         {
@@ -315,6 +374,20 @@ void handleCommand(const String& commandType, const JsonObject& parameters, cons
             axisLimit["limitIndex"] = steppers[i].atLimit ? steppers[i].lastLimitIndex : -1;
         }
         message = "State retrieved successfully.";
+    }
+    else if (commandType == "setStateInterval")
+    {
+        unsigned long ms = parameters["ms"] | g_StateIntervalMs;
+        if (ms < 20) ms = 20;
+        if (ms > 5000) ms = 5000;
+        g_StateIntervalMs = ms;
+        message = "State interval set to " + String(g_StateIntervalMs) + " ms.";
+    }
+    else if (commandType == "enableStateStream")
+    {
+        bool enabled = parameters["enabled"] | true;
+        g_StateStreamEnabled = enabled;
+        message = String("State stream ") + (g_StateStreamEnabled ? "enabled" : "disabled");
     }
     else if (commandType == "homingSequence")
     {
@@ -352,35 +425,13 @@ void sendSerialMessage(const char* type, const char* uuid, const char* command, 
 {
     StaticJsonDocument<1024> doc;
     doc["type"] = type;
-
-    if (uuid != nullptr && strlen(uuid) > 0)
-    {
-        doc["uuid"] = uuid;
-    }
-
-    if (command != nullptr)
-    {
-        doc["command"] = command;
-    }
-
-    if (status != nullptr)
-    {
-        doc["status"] = status;
-    }
-
-    if (message != nullptr)
-    {
-        doc["message"] = message;
-    }
-
-    if (stateUpdate != nullptr && !stateUpdate->isNull())
-    {
-        doc["stateUpdate"] = *stateUpdate;
-    }
-
-    String serializedMessage;
-    serializeJson(doc, serializedMessage);
-    Serial.println(serializedMessage);
+    if (uuid != nullptr && strlen(uuid) > 0) { doc["uuid"] = uuid; }
+    if (command != nullptr) { doc["command"] = command; }
+    if (status != nullptr) { doc["status"] = status; }
+    if (message != nullptr) { doc["message"] = message; }
+    if (stateUpdate != nullptr && !stateUpdate->isNull()) { doc["stateUpdate"] = *stateUpdate; }
+    serializeJson(doc, Serial);
+    Serial.println();
 }
 
 
@@ -394,7 +445,7 @@ void SetAxisAngle(int InAxisID, float InAngle)
 {
     if (InAxisID < 0 || InAxisID >= NUM_STEPPERS) 
     {
-        Serial.println("Invalid axis ID");
+        if (g_DebugSerial) Serial.println("Invalid axis ID");
         return;
     }
 
@@ -421,7 +472,7 @@ void SetAxisAngle(int InAxisID, float InAngle)
     }
 
     // Convert angle difference to steps and set stepsToMove
-    long steps = degreesToSteps(angleDifference, motor.stepsPerRevolution);
+    long steps = (long)(angleDifference * motor.stepsPerDegree);
     motor.stepsToMove = steps;
     motor.stepper.move(steps);
 }
@@ -437,15 +488,49 @@ float GetAxisAngle(int InAxisID)
 {
     if (InAxisID < 0 || InAxisID >= NUM_STEPPERS) 
     {
-        Serial.println("Invalid axis ID");
+        if (g_DebugSerial) Serial.println("Invalid axis ID");
         return 0.0;
     }
     StepperMotor &motor = steppers[InAxisID];
-    float angle = (float)motor.stepper.currentPosition() / motor.stepsPerRevolution * 360.0;
+    float angle = (float)motor.stepper.currentPosition() / motor.stepsPerDegree;
 
     // Normalize angle to -180 to +180
     if (angle > 180.0) angle -= 360.0;
     else if (angle < -180.0) angle += 360.0;
+
+    return angle;
+}
+
+// Fast integer version for state publishing
+int GetAxisAngleInt(int InAxisID) 
+{
+    if (InAxisID < 0 || InAxisID >= NUM_STEPPERS) 
+    {
+        return 0;
+    }
+    StepperMotor &motor = steppers[InAxisID];
+    int angle = (int)((float)motor.stepper.currentPosition() / motor.stepsPerDegree);
+
+    // Normalize angle to -180 to +180
+    while (angle > 180) angle -= 360;
+    while (angle < -180) angle += 360;
+
+    return angle;
+}
+
+// Fast integer version for target angle
+int GetTargetAngleInt(int InAxisID) 
+{
+    if (InAxisID < 0 || InAxisID >= NUM_STEPPERS) 
+    {
+        return 0;
+    }
+    StepperMotor &motor = steppers[InAxisID];
+    int angle = (int)((float)motor.stepper.targetPosition() / motor.stepsPerDegree);
+
+    // Normalize angle to -180 to +180
+    while (angle > 180) angle -= 360;
+    while (angle < -180) angle += 360;
 
     return angle;
 }
@@ -459,7 +544,7 @@ float GetAxisAngleInRadians(int InAxisID)
 // Explain
 void AbortAllCommands() 
 {
-    Serial.println("Aborting all commands.");
+    if (g_DebugSerial) Serial.println("Aborting all commands.");
 
     for (int i = 0; i < NUM_STEPPERS; i++) 
     {
@@ -476,7 +561,7 @@ void AbortAllCommands()
         motor.stepper.setCurrentPosition(motor.stepper.currentPosition());
     }
 
-    Serial.println("All commands aborted - all motor positions have been reset, homing sequence required.");
+    if (g_DebugSerial) Serial.println("All commands aborted - all motor positions have been reset, homing sequence required.");
 }
 
 // -----------------------------------------------------------------------------------------------------------------------------
@@ -499,6 +584,9 @@ void runActiveSteppers()
             else 
             {
                 motor.stepper.run();
+                if (motor.stepper.distanceToGo() == 0) {
+                    motor.stepsToMove = 0.0;
+                }
             }
         }
     }
@@ -529,7 +617,7 @@ void SafeMoveSteps(int stepperIndex, float steps)
 void SafeMoveDegrees(int stepperIndex, float degrees) 
 {
     StepperMotor &motor = steppers[stepperIndex];
-    long steps = degreesToSteps(degrees, motor.stepsPerRevolution);
+    long steps = (long)(degrees * motor.stepsPerDegree);
     SafeMoveSteps(stepperIndex, steps);
 }
 
@@ -583,10 +671,12 @@ bool isStepperAtLimit(int stepperIndex)
                 {
                     motor.stepper.stop();
                     motor.stepsToMove = 0.0;
-                    Serial.print("Digital limit (" );
-                    Serial.print(i);
-                    Serial.print(") blocking inward move for Stepper ");
-                    Serial.println(stepperIndex);
+                    if (g_DebugSerial) {
+                        Serial.print("Digital limit (" );
+                        Serial.print(i);
+                        Serial.print(") blocking inward move for Stepper ");
+                        Serial.println(stepperIndex);
+                    }
                     return true;
                 }
                 
@@ -612,19 +702,19 @@ void ExecuteHomingCommand(int InAxisIndex, bool InHomeAll)
 {
     if (InHomeAll || InAxisIndex == -1) 
     {
-        Serial.println("Homing all Axes.");
+        if (g_DebugSerial) Serial.println("Homing all Axes.");
         HomeAxis(3);
         HomeAxis(4);
         HomeAxis(2);
         HomeAxis(1);
         HomeAxis(0);
-        Serial.println("All Axes homed.");
+        if (g_DebugSerial) Serial.println("All Axes homed.");
     } 
     else 
     {
         if (InAxisIndex < 0 || InAxisIndex > NUM_STEPPERS - 1)
         {
-          Serial.println("Invalid Axis index.");
+          if (g_DebugSerial) Serial.println("Invalid Axis index.");
           return;
         }
         HomeAxis(InAxisIndex);
@@ -635,7 +725,7 @@ void ExecuteHomingCommand(int InAxisIndex, bool InHomeAll)
 // If limit is hit, the motor moves to it´s origin (limit is position defined in the stepper class)
 void HomeAxis(int InAxisIndex) 
 {
-    Serial.println("Homing Axis " + String(InAxisIndex) + ": starting...");
+    if (g_DebugSerial) Serial.println("Homing Axis " + String(InAxisIndex) + ": starting...");
 
     StepperMotor &motor = steppers[InAxisIndex];
     motor.isHoming = true;
@@ -695,7 +785,7 @@ void HomeAxis(int InAxisIndex)
                 {
                     DegreesToHomePos = motor.limitPositions[i];
                 }
-                Serial.println("Homing Axis " + String(InAxisIndex) + ": found limit index " + String(i));
+                if (g_DebugSerial) Serial.println("Homing Axis " + String(InAxisIndex) + ": found limit index " + String(i));
                 foundLimit = true;
                 
                 // Stop the motor immediately
@@ -708,7 +798,7 @@ void HomeAxis(int InAxisIndex)
         // Check for timeout
         if (millis() - startTime > timeout) 
         {
-            Serial.println("Homing Axis " + String(InAxisIndex) + ": Error - timeout after " + String(timeout / 1000.0, 2) + " seconds.");
+            if (g_DebugSerial) Serial.println("Homing Axis " + String(InAxisIndex) + ": Error - timeout after " + String(timeout / 1000.0, 2) + " seconds.");
             motor.stepper.stop();
             motor.stepsToMove = 0.0;
             motor.isHoming = false;
@@ -719,7 +809,7 @@ void HomeAxis(int InAxisIndex)
         // Check if motor stopped moving (might have hit mechanical limit)
         if (motor.stepper.distanceToGo() == 0 && motor.stepsToMove == 0.0) 
         {
-            Serial.println("Homing Axis " + String(InAxisIndex) + ": Warning - motor stopped without hitting sensor.");
+            if (g_DebugSerial) Serial.println("Homing Axis " + String(InAxisIndex) + ": Warning - motor stopped without hitting sensor.");
             break;
         }
     }
@@ -746,7 +836,7 @@ void HomeAxis(int InAxisIndex)
 
     motor.isHoming = false;
 
-    Serial.println("Homing Axis " + String(InAxisIndex) + ": completed.");
+    if (g_DebugSerial) Serial.println("Homing Axis " + String(InAxisIndex) + ": completed.");
 }
 
 // -----------------------------------------------------------------------------------------------------------------------------
@@ -756,14 +846,13 @@ void HomeAxis(int InAxisIndex)
 // Explain
 void ExecuteTestCommand(int InTestID) 
 {
-    Serial.print("Requested TestID: ");
-    Serial.println(InTestID);
+    if (g_DebugSerial) { Serial.print("Requested TestID: "); Serial.println(InTestID); }
 
     switch (InTestID) 
     {
         case 1:
         {
-            Serial.println("Running test ID 1 - Constrained Test Axis 1");
+            if (g_DebugSerial) Serial.println("Running test ID 1 - Constrained Test Axis 1");
             int Motors_Test1[] = {1};
 
             SetAxisAngle(1, 15.0);
@@ -772,12 +861,12 @@ void ExecuteTestCommand(int InTestID)
             SetAxisAngle(1, 0.0);
             waitForMotors(Motors_Test1, 1);
 
-            Serial.println("Completed test ID 1 - Constrained Test Axis 1");
+            if (g_DebugSerial) Serial.println("Completed test ID 1 - Constrained Test Axis 1");
             break;
         }
         case 6:
         {
-            Serial.println("Running test ID 6 - Jogging 1");
+            if (g_DebugSerial) Serial.println("Running test ID 6 - Jogging 1");
             int Motors_Jog1[] = {0, 1, 2, 3, 4, 5};
             
             SetAxisAngle(0, 25.0);
@@ -812,13 +901,13 @@ void ExecuteTestCommand(int InTestID)
             SetAxisAngle(5, 0.0);
             waitForMotors(Motors_Jog1, 6);
 
-            Serial.println("Completed test ID 6 - Jogging 1");
+            if (g_DebugSerial) Serial.println("Completed test ID 6 - Jogging 1");
             break;
         }
 
         case 7:
         {
-            Serial.println("Running test ID 7 - Jogging 2");
+            if (g_DebugSerial) Serial.println("Running test ID 7 - Jogging 2");
             int Motors_Jog2[] = {0, 1, 2, 3, 4, 5};
             
             SetAxisAngle(0, 5.0);
@@ -853,14 +942,14 @@ void ExecuteTestCommand(int InTestID)
             SetAxisAngle(5, 0.0);
             waitForMotors(Motors_Jog2, 6);
 
-            Serial.println("Completed test ID 7 - Jogging 2");
+            if (g_DebugSerial) Serial.println("Completed test ID 7 - Jogging 2");
             break;
         }
 
         default:
             if (InTestID < 0 || InTestID > 7) 
             {
-              Serial.println("Invalid TestID " + String(InTestID));
+              if (g_DebugSerial) Serial.println("Invalid TestID " + String(InTestID));
             }
             else
             {
@@ -870,15 +959,54 @@ void ExecuteTestCommand(int InTestID)
     }
 }
 
+// -----------------------------------------------------------------------------------------------------------------------------
+// State streaming publisher (compact bracketed format with integer degrees)
+// -----------------------------------------------------------------------------------------------------------------------------
+void PublishStateUpdate()
+{
+    // Build into smaller buffer using integer format - much faster than float/dtostrf
+    char buf[256];
+    unsigned long ts = millis();
+    
+    // Get all axis data first to minimize time in snprintf
+    int cur[NUM_STEPPERS];
+    int tgt[NUM_STEPPERS];
+    int lim[NUM_STEPPERS];
+    
+    for (int i = 0; i < NUM_STEPPERS; i++)
+    {
+        cur[i] = GetAxisAngleInt(i);
+        tgt[i] = GetTargetAngleInt(i);
+        lim[i] = 0;
+        if (steppers[i].atLimit) { 
+            lim[i] = (steppers[i].lastLimitIndex == 0) ? -1 : 1; 
+        }
+    }
+    
+    // Single snprintf call with integer format: state-update: [ts][0,cur,tgt,lim][1,cur,tgt,lim]...
+    snprintf(buf, sizeof(buf), 
+        "state-update: [%lu][0,%d,%d,%d][1,%d,%d,%d][2,%d,%d,%d][3,%d,%d,%d][4,%d,%d,%d][5,%d,%d,%d]",
+        ts,
+        cur[0], tgt[0], lim[0],
+        cur[1], tgt[1], lim[1], 
+        cur[2], tgt[2], lim[2],
+        cur[3], tgt[3], lim[3],
+        cur[4], tgt[4], lim[4],
+        cur[5], tgt[5], lim[5]
+    );
+    
+    Serial.println(buf);
+}
+
 // Explain
 void DefaultTest(int InAxis)
 {
-    Serial.println("Test Axis " + String(InAxis) + " started...");
+    if (g_DebugSerial) Serial.println("Test Axis " + String(InAxis) + " started...");
     int testMotors[] = {InAxis};
 
     SetAxisAngle(InAxis, 45.0);
     waitForMotors(testMotors, 1);
     SetAxisAngle(InAxis, 0.0);
     waitForMotors(testMotors, 1);
-    Serial.println("Running test for Axis " + String(InAxis) + " completed.");
+    if (g_DebugSerial) Serial.println("Running test for Axis " + String(InAxis) + " completed.");
 }

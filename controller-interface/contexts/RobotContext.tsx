@@ -36,6 +36,10 @@ interface RobotContextType {
   setBaudRate: (baud: number) => void;
   updateTargetAngle: (axis: number, angle: number) => void;
   reloadConfig: () => Promise<void>;
+  // Streaming state helpers
+  pullLatestState: () => Promise<void>;
+  isDraggingSlider: boolean[];
+  setSliderDragging: (axis: number, dragging: boolean) => void;
 }
 
 const RobotContext = createContext<RobotContextType | undefined>(undefined);
@@ -69,6 +73,9 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [robotConfig, setRobotConfig] = useState<RobotConfig | null>(null);
   const [targetAngles, setTargetAngles] = useState<number[]>(
     defaultArmState.joints.map(joint => joint.targetAngle)
+  );
+  const [isDraggingSlider, setIsDraggingSlider] = useState<boolean[]>(
+    defaultArmState.joints.map(() => false)
   );
 
   // Initialize serial interface listeners
@@ -255,29 +262,101 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, []);
 
+  // Public helpers to mark slider drag state
+  const setSliderDragging = useCallback((axis: number, dragging: boolean) => {
+    setIsDraggingSlider(prev => {
+      const next = [...prev];
+      next[axis] = dragging;
+      return next;
+    });
+  }, []);
+
+  const pullLatestState = useCallback(async () => {
+    try {
+      const res = await fetch('/api/serial/state');
+      const data = await res.json();
+      const latest = data?.latestState as { timestamp: number; axes: Record<string, { current: number; target: number; limit: number }> } | null;
+      if (!latest || !latest.axes) return;
+      setArmState(prev => {
+        const newState = { ...prev };
+        const numJoints = newState.joints.length;
+        for (let i = 0; i < numJoints; i++) {
+          const axisKey = String(i);
+          const axisData = latest.axes[axisKey];
+          if (!axisData) continue;
+          // Current angle always from stream
+          newState.joints[i].currentAngle = axisData.current;
+          // Target angle from stream unless user is dragging this axis
+          if (!isDraggingSlider[i]) {
+            newState.joints[i].targetAngle = axisData.target;
+          }
+          // Limit mapping: -1 left -> index 0, 1 right -> index 1
+          if (axisData.limit === 0) {
+            newState.joints[i].isAtLimit = false;
+            newState.joints[i].limitIndex = null;
+          } else {
+            newState.joints[i].isAtLimit = true;
+            newState.joints[i].limitIndex = axisData.limit < 0 ? 0 : 1;
+          }
+        }
+        return newState;
+      });
+      // Keep local targetAngles in sync with stream for non-dragging axes
+      setTargetAngles(prev => {
+        const next = [...prev];
+        for (let i = 0; i < next.length; i++) {
+          const axisKey = String(i);
+          const axisData = latest.axes[axisKey];
+          if (!axisData) continue;
+          if (!isDraggingSlider[i]) {
+            next[i] = axisData.target;
+          }
+        }
+        return next;
+      });
+    } catch (e) {
+      console.error('Failed to fetch latest state:', e);
+    }
+  }, [isDraggingSlider]);
+
   const reloadConfig = useCallback(async () => {
     try {
-      // Force reload configs from the server
-      await serialClient.reloadConfigs();
+      // Reload configs from the server by calling the API endpoint
+      const response = await fetch('/api/config/reload', {
+        method: 'POST',
+      });
       
-      // Get the updated configs
-      const updatedRobotConfig = serialClient.getRobotConfig();
-      const updatedCommandConfig = serialClient.getCommandConfig();
+      if (!response.ok) {
+        throw new Error('Failed to reload config from server');
+      }
       
-      if (updatedRobotConfig) {
-        setRobotConfig(updatedRobotConfig);
-        // Update arm state with new robot config
-        if (updatedRobotConfig.joints) {
+      // Now reload configs from the server into the client
+      await serialClient.loadConfigs();
+      
+      // Load command config
+      const config = serialClient.getCommandConfig();
+      if (config) {
+        setCommandConfig(config);
+      }
+      
+      // Load robot config and force re-render by creating new object reference
+      const robotConf = serialClient.getRobotConfig();
+      if (robotConf) {
+        // Force new object reference to trigger React re-renders
+        setRobotConfig({ ...robotConf });
+        
+        // Update arm state with robot config joints
+        if (robotConf.joints) {
           setArmState(prev => ({
             ...prev,
-            joints: updatedRobotConfig.joints.map((joint, index) => ({
+            joints: robotConf.joints.map((joint, index) => ({
               id: index,
               currentAngle: prev.joints[index]?.currentAngle || 0,
               targetAngle: prev.joints[index]?.targetAngle || 0,
               minAngle: joint.minAngle,
               maxAngle: joint.maxAngle,
               isCalibrated: prev.joints[index]?.isCalibrated || false,
-              dHParameters: prev.joints[index]?.dHParameters || {
+              dHParameters: {
                 theta: joint.theta,
                 d: joint.d,
                 a: joint.a,
@@ -287,19 +366,15 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }));
           // Update target angles to respect new limits
           setTargetAngles(
-            updatedRobotConfig.joints.map((joint, index) => 
+            robotConf.joints.map((joint, index) => 
               Math.max(joint.minAngle, Math.min(joint.maxAngle, targetAngles[index] || 0))
             )
           );
         }
       }
-      
-      if (updatedCommandConfig) {
-        setCommandConfig(updatedCommandConfig);
-      }
     } catch (error) {
       console.error('Failed to reload config:', error);
-      throw error;
+      throw error; // Re-throw so the UI can handle the error
     }
   }, [targetAngles]);
 
@@ -336,7 +411,10 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSelectedPort: setSelectedPortHandler,
     setBaudRate,
     updateTargetAngle,
-    reloadConfig
+    reloadConfig,
+    pullLatestState,
+    isDraggingSlider,
+    setSliderDragging
   };
 
   return (

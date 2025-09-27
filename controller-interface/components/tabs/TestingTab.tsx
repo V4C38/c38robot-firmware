@@ -6,7 +6,7 @@ import { Play, RefreshCw, Activity, Bug, Check, Download, Search, Filter } from 
 import * as Select from '@radix-ui/react-select';
 
 export const TestingTab: React.FC = () => {
-  const { isConnected, sendCommand, commandConfig, armState, updateArmState } = useRobot();
+  const { isConnected, sendCommand, commandConfig, armState, updateArmState, pullLatestState } = useRobot();
   const [selectedMode, setSelectedMode] = useState<'single' | 'jog1' | 'jog2'>('single');
   const [selectedAxis, setSelectedAxis] = useState<string>('0');
   const [isRunningTest, setIsRunningTest] = useState(false);
@@ -60,7 +60,7 @@ export const TestingTab: React.FC = () => {
     // While this tab is visible, request state periodically to keep UI updating during tests
     const stateInterval = setInterval(() => {
       if (isConnected) {
-        void sendCommand({ command: 'getState' });
+        void pullLatestState();
       }
     }, 1000);
 
@@ -159,7 +159,9 @@ export const TestingTab: React.FC = () => {
       // Raw RX logs containing getState response JSON
       (log.includes('RX:') && log.includes('"command":"getState"')) ||
       // COMMAND logs sending getState
-      (log.includes('COMMAND') && log.includes('getState'))
+      (log.includes('COMMAND') && log.includes('getState')) ||
+      // Raw RX logs containing state-update messages
+      (log.includes('RX:') && log.includes('state-update:'))
     );
   };
 
@@ -182,7 +184,7 @@ export const TestingTab: React.FC = () => {
           case 'error':
             return log.includes('ERROR');
           case 'info':
-            return log.includes('INFO') && !log.includes('COMMAND') && !log.includes('RESPONSE') && !log.includes('ERROR');
+            return log.includes('INFO') && !log.includes('COMMAND') && !log.includes('RESPONSE') && !log.includes('ERROR') && !isUpdateResponse(log);
           default:
             return true;
         }

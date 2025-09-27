@@ -29,7 +29,10 @@ class SimulatedMicrocontroller {
   private settings: DebugSettings | null = null;
   private onResponse: ResponseCallback | null = null;
   private loopTimer: NodeJS.Timeout | null = null;
+  private publishTimer: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
+  private publishEnabled: boolean = true;
+  private publishIntervalMs: number = 200;
 
   private currentAngles: number[] = [];
   private targetAngles: number[] = [];
@@ -55,6 +58,7 @@ class SimulatedMicrocontroller {
     this.limitIndex = new Array(axes).fill(null);
 
     this.startLoop();
+    this.startPublisher();
     this.isRunning = true;
   }
 
@@ -62,6 +66,10 @@ class SimulatedMicrocontroller {
     if (this.loopTimer) {
       clearInterval(this.loopTimer);
       this.loopTimer = null;
+    }
+    if (this.publishTimer) {
+      clearInterval(this.publishTimer);
+      this.publishTimer = null;
     }
     this.isRunning = false;
     this.onResponse = null;
@@ -155,6 +163,30 @@ class SimulatedMicrocontroller {
         setTimeout(() => callback(this.buildStateResponse(command.uuid, 'runTest', 'success', 'Test completed.')), totalDelay);
         break;
       }
+      case 'setStateInterval': {
+        const ms = (command as unknown as { ms: number }).ms;
+        this.setStateInterval(ms);
+        setTimeout(() => callback({
+          type: 'response',
+          uuid: command.uuid,
+          command: 'setStateInterval',
+          status: 'success',
+          message: `State interval set to ${this.publishIntervalMs} ms`
+        } as BaseResponse), baseOverhead);
+        break;
+      }
+      case 'enableStateStream': {
+        const enabled = (command as unknown as { enabled: boolean }).enabled;
+        this.enableStateStream(enabled);
+        setTimeout(() => callback({
+          type: 'response',
+          uuid: command.uuid,
+          command: 'enableStateStream',
+          status: 'success',
+          message: `State stream ${enabled ? 'enabled' : 'disabled'}`
+        } as BaseResponse), baseOverhead);
+        break;
+      }
       case 'emergencyStop': {
         const delay = baseOverhead + this.settings.delays.emergencyStopMs;
         // Stop where we are
@@ -168,6 +200,17 @@ class SimulatedMicrocontroller {
         setTimeout(() => callback(this.buildStateResponse(command.uuid, name, 'success', 'OK')), baseOverhead);
       }
     }
+  }
+
+  public setStateInterval(ms: number): void {
+    const clamped = Math.max(20, Math.min(5000, Math.floor(ms)));
+    this.publishIntervalMs = clamped;
+    this.startPublisher();
+  }
+
+  public enableStateStream(enabled: boolean): void {
+    this.publishEnabled = enabled;
+    this.startPublisher();
   }
 
   private startLoop(): void {
@@ -212,6 +255,35 @@ class SimulatedMicrocontroller {
         this.currentAngles[i] = next;
       }
     }, tickMs);
+  }
+
+  private startPublisher(): void {
+    if (this.publishTimer) {
+      clearInterval(this.publishTimer);
+      this.publishTimer = null;
+    }
+    if (!this.publishEnabled) return;
+    this.publishTimer = setInterval(() => {
+      // Build bracketed compact state line with integer format for consistency with firmware
+      const ts = Date.now();
+      const parts: string[] = [`[${ts}]`];
+      for (let i = 0; i < this.currentAngles.length; i++) {
+        // limit: -1 left (index 0), 0 none, 1 right (index 1)
+        const li = this.limitIndex[i];
+        const lim = li == null ? 0 : (li === 0 ? -1 : 1);
+        // Use integer values to match firmware optimization
+        const curInt = Math.round(this.currentAngles[i]);
+        const tgtInt = Math.round(this.targetAngles[i]);
+        parts.push(`[${i},${curInt},${tgtInt},${lim}]`);
+      }
+      const line = `state-update: ${parts.join('')}`;
+      // Feed into SerialManager ingest path
+      const g = globalThis as any;
+      const mgr = g.__serialManagerInstance as { ingestRawLine?: (l: string) => void } | undefined;
+      if (mgr?.ingestRawLine) {
+        mgr.ingestRawLine(line);
+      }
+    }, this.publishIntervalMs);
   }
 
   private clampToJointLimits(axis: number, angle: number): number {

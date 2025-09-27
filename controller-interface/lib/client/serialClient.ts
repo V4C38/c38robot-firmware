@@ -258,8 +258,13 @@ export class SerialClient extends EventEmitter {
   }
 
   // Reload configurations from server
-  public async reloadConfigs(): Promise<void> {
+  public async loadConfigs(): Promise<void> {
     await this.updateStatus();
+  }
+
+  // Reload configurations from server (alias for compatibility)
+  public async reloadConfigs(): Promise<void> {
+    await this.loadConfigs();
   }
 
   // Cleanup
@@ -284,6 +289,7 @@ if (typeof window !== 'undefined') {
     getConnectionStatus: () => false,
     getCommandConfig: () => null,
     getRobotConfig: () => null,
+    loadConfigs: async () => {},
     reloadConfigs: async () => {},
     destroy: () => {},
     on: (event: any, listener: any) => mockClient,

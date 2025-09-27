@@ -16,8 +16,9 @@ export async function GET() {
     const connected = serialManager.getConnectionStatus();
     const config = serialManager.getCommandConfig();
     const robotConfig = serialManager.getRobotConfig();
+    const latestState = serialManager.getLatestState?.() ?? null;
     
-    return NextResponse.json({ connected, config, robotConfig });
+    return NextResponse.json({ connected, config, robotConfig, latestState });
   } catch (error) {
     console.error('Failed to get status:', error);
     return NextResponse.json({ 

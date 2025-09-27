@@ -6,7 +6,7 @@ import { AxisSlider } from '@/components/AxisSlider';
 import { Home, AlertTriangle, RotateCcw, ChevronDown, ChevronUp, Maximize2, Minimize2, Activity } from 'lucide-react';
 
 export const AxisControlTab: React.FC = () => {
-  const { armState, isConnected, sendCommand, targetAngles, updateTargetAngle, robotConfig } = useRobot();
+  const { armState, isConnected, sendCommand, targetAngles, updateTargetAngle, robotConfig, pullLatestState, setSliderDragging } = useRobot();
   const [collapsedAxes, setCollapsedAxes] = useState<Set<number>>(new Set());
   const [allCollapsed, setAllCollapsed] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState(true);
@@ -31,12 +31,14 @@ export const AxisControlTab: React.FC = () => {
   }, [isConnected, sendCommand]);
 
   const handleSliderChange = (axis: number, value: number[]) => {
+    setSliderDragging(axis, true);
     updateTargetAngle(axis, value[0]);
   };
 
   const handleSliderCommit = (axis: number, value: number[]) => {
     // Send command when slider drag ends
     sendAxisCommand(axis, value[0]);
+    setSliderDragging(axis, false);
   };
 
   const handleTargetChange = (axis: number, value: string) => {
@@ -178,7 +180,7 @@ export const AxisControlTab: React.FC = () => {
   useEffect(() => {
     if (autoUpdate && isConnected && updateInterval > 0) {
       intervalRef.current = setInterval(() => {
-        handleGetState();
+        void pullLatestState();
       }, updateInterval * 1000);
     } else {
       if (intervalRef.current) {

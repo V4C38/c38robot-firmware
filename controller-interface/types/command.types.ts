@@ -35,6 +35,16 @@ export interface RunTestCommand extends BaseCommand {
   testIndex: number;
 }
 
+export interface SetStateIntervalCommand extends BaseCommand {
+  command: 'setStateInterval';
+  ms: number;
+}
+
+export interface EnableStateStreamCommand extends BaseCommand {
+  command: 'enableStateStream';
+  enabled: boolean;
+}
+
 // Union type for all commands
 export type Command = 
   | HomingSequenceCommand 
@@ -42,7 +52,9 @@ export type Command =
   | GetStateCommand 
   | EmergencyStopCommand 
   | SetArmStateCommand 
-  | RunTestCommand;
+  | RunTestCommand
+  | SetStateIntervalCommand
+  | EnableStateStreamCommand;
 
 // Response interfaces
 export interface BaseResponse {
@@ -88,7 +100,9 @@ export type CommandName =
   | 'getState'
   | 'emergencyStop'
   | 'setArmState'
-  | 'runTest';
+  | 'runTest'
+  | 'setStateInterval'
+  | 'enableStateStream';
 
 interface WireCommandBase {
   type: 'command';

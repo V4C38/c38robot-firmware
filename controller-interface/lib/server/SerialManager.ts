@@ -28,6 +28,11 @@ class SerialManager extends EventEmitter {
   private currentGetStateCommand: Command | null = null;
   private getStateWaiters: Array<(message: BaseResponse) => void> = [];
   private lastStateResponse: BaseResponse | null = null;
+  // Latest compact state snapshot from MCU stream
+  private latestState: {
+    timestamp: number;
+    axes: Record<string, { current: number; target: number; limit: number }>;
+  } | null = null;
 
   private constructor() {
     super();
@@ -87,6 +92,7 @@ class SerialManager extends EventEmitter {
   private forceClosePort() {
     // Clear simulator state as well
     if (this.debugSimulated) {
+      SimulatedMicrocontroller.getInstance().disconnect();
       this.debugSimulated = false;
     }
     if (this.serialPort) {
@@ -412,6 +418,12 @@ class SerialManager extends EventEmitter {
         await this.log(`Connecting to debug simulator at ${path}`);
         this.debugSimulated = true;
         await this.loadDebugSettings();
+        
+        // Ensure robot config is loaded before starting simulator
+        if (!this.robotConfig) {
+          await this.loadRobotConfig();
+        }
+        
         // Start simulator engine
         if (this.robotConfig && this.debugSettings) {
           SimulatedMicrocontroller.getInstance().connect(
@@ -422,6 +434,11 @@ class SerialManager extends EventEmitter {
               void this.processMessage(message as unknown as Record<string, unknown>);
             }
           );
+          await this.log('Debug simulator connected successfully');
+        } else {
+          await this.log(`Failed to start debug simulator - robotConfig: ${!!this.robotConfig}, debugSettings: ${!!this.debugSettings}`, 'ERROR');
+          this.debugSimulated = false;
+          throw new Error('Failed to load required configurations for debug simulator');
         }
         this.isConnected = true;
         this.emit('connectionChanged', true);
@@ -678,8 +695,12 @@ class SerialManager extends EventEmitter {
           continue;
         }
         void this.log(`RX: ${message}`);
-        const parsed = JSON.parse(message);
-        this.processMessage(parsed);
+        if (message.startsWith('state-update:')) {
+          this.parseCompactStateUpdate(message);
+        } else {
+          const parsed = JSON.parse(message);
+          this.processMessage(parsed);
+        }
       } catch (error) {
         console.error('Failed to parse message:', message, error);
         void this.log(`Parse error for line: ${message}`, 'ERROR');
@@ -724,6 +745,57 @@ class SerialManager extends EventEmitter {
       }
       this.emit('messageReceived', message as BaseResponse);
     }
+  }
+
+  // Public method for simulator to ingest a raw line (bypasses serial)
+  public ingestRawLine(line: string): void {
+    try {
+      const message = line.replace(/\r+$/, '').trim();
+      if (message.length === 0) return;
+      void this.log(`RX: ${message}`);
+      if (message.startsWith('state-update:')) {
+        this.parseCompactStateUpdate(message);
+        return;
+      }
+      const parsed = JSON.parse(message);
+      void this.processMessage(parsed);
+    } catch (error) {
+      console.error('Failed to ingest raw line:', line, error);
+      void this.log(`Parse error for line: ${line}`, 'ERROR');
+    }
+  }
+
+  // Parse bracketed compact state update (now with integer degrees)
+  private parseCompactStateUpdate(line: string): void {
+    // Expected: state-update: [timestamp][id,cur,tgt,lim][id,cur,tgt,lim]...
+    // Values are now integers instead of floats for better performance
+    const bracketRegex = /\[(.*?)\]/g;
+    const matches: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = bracketRegex.exec(line)) !== null) {
+      matches.push(m[1]);
+    }
+    if (matches.length === 0) return;
+    const timestamp = Number(matches[0]);
+    const axes: Record<string, { current: number; target: number; limit: number }> = {};
+    for (let i = 1; i < matches.length; i++) {
+      const tuple = matches[i].split(',');
+      if (tuple.length < 4) continue;
+      const id = parseInt(tuple[0], 10);
+      const cur = parseInt(tuple[1], 10);
+      const tgt = parseInt(tuple[2], 10);
+      const lim = parseInt(tuple[3], 10);
+      if (!Number.isFinite(id) || !Number.isFinite(cur) || !Number.isFinite(tgt) || !Number.isFinite(lim)) continue;
+      axes[String(id)] = { current: cur, target: tgt, limit: lim };
+    }
+    this.latestState = { timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(), axes };
+    // Also emit an event for future streaming consumers
+    this.emit('stateUpdated', this.latestState);
+  }
+
+  // Expose latest snapshot for API
+  public getLatestState(): { timestamp: number; axes: Record<string, { current: number; target: number; limit: number }> } | null {
+    return this.latestState ? { timestamp: this.latestState.timestamp, axes: { ...this.latestState.axes } } : null;
   }
 
   // Coalesce concurrent getState requests to a single on-wire request

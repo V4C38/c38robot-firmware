@@ -324,14 +324,15 @@ export const RobotArm3D: React.FC<RobotArm3DProps> = ({
           0, 0, 0, 1
         );
 
-        // Combine with previous transformations
-        currentTransform.multiply(transform);
-
-        // Apply transformation to segment
-        segmentGroup.matrix.copy(currentTransform);
+        // Place segment at previous transform (frame i-1), then advance to frame i
+        const preTransform = currentTransform.clone();
+        segmentGroup.matrix.copy(preTransform);
         segmentGroup.matrixAutoUpdate = false;
 
         armGroup.add(segmentGroup);
+
+        // Advance cumulative transform
+        currentTransform.multiply(transform);
       } else {
         // Just add the joint if no link
         const segmentGroup = new THREE.Group();
@@ -351,11 +352,13 @@ export const RobotArm3D: React.FC<RobotArm3DProps> = ({
           0, 0, 0, 1
         );
 
-        currentTransform.multiply(transform);
-        segmentGroup.matrix.copy(currentTransform);
+        const preTransform = currentTransform.clone();
+        segmentGroup.matrix.copy(preTransform);
         segmentGroup.matrixAutoUpdate = false;
 
         armGroup.add(segmentGroup);
+
+        currentTransform.multiply(transform);
       }
     });
 
@@ -435,11 +438,13 @@ export const RobotArm3D: React.FC<RobotArm3DProps> = ({
           0, 0, 0, 1
         );
 
-        currentTransform.multiply(transform);
-        segmentGroup.matrix.copy(currentTransform);
+        const preTransform = currentTransform.clone();
+        segmentGroup.matrix.copy(preTransform);
         segmentGroup.matrixAutoUpdate = false;
 
         armGroup.add(segmentGroup);
+
+        currentTransform.multiply(transform);
       } else {
         const segmentGroup = new THREE.Group();
         segmentGroup.add(jointMesh);
@@ -457,11 +462,13 @@ export const RobotArm3D: React.FC<RobotArm3DProps> = ({
           0, 0, 0, 1
         );
 
-        currentTransform.multiply(transform);
-        segmentGroup.matrix.copy(currentTransform);
+        const preTransform = currentTransform.clone();
+        segmentGroup.matrix.copy(preTransform);
         segmentGroup.matrixAutoUpdate = false;
 
         armGroup.add(segmentGroup);
+
+        currentTransform.multiply(transform);
       }
     });
 
