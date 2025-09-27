@@ -182,6 +182,9 @@ export class SerialClient extends EventEmitter {
   // Close serial connection
   public async closePort(): Promise<void> {
     try {
+      if (!this.isConnected) {
+        return;
+      }
       const response = await fetch('/api/serial/disconnect', {
         method: 'POST',
       });
@@ -206,6 +209,10 @@ export class SerialClient extends EventEmitter {
   // Send command through serial port
   public async sendCommand(command: Omit<Command, 'uuid' | 'type'>): Promise<void> {
     try {
+      if (!this.isConnected) {
+        // Silently ignore when not connected to avoid console errors during mode flips
+        return;
+      }
       const response = await fetch('/api/serial/command', {
         method: 'POST',
         headers: {

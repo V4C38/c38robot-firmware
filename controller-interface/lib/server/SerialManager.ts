@@ -5,6 +5,7 @@ import type { Command, BaseResponse, CommandConfig } from '@/types/command.types
 import type { RobotConfig } from '@/types/robot-config.types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import SimulatedMicrocontroller from '@/lib/server/SimulatedMicrocontroller';
 
 // Singleton instance for server-side serial management
 class SerialManager extends EventEmitter {
@@ -18,6 +19,15 @@ class SerialManager extends EventEmitter {
   private isConnected: boolean = false;
   private logFile: string;
   private logs: string[] = [];
+  // Debug simulation
+  private debugSimulated: boolean = false;
+  private debugSettings: DebugSettings | null = null;
+  private simAngles: number[] = Array(6).fill(0);
+  // getState request coalescing
+  private getStateInFlight: boolean = false;
+  private currentGetStateCommand: Command | null = null;
+  private getStateWaiters: Array<(message: BaseResponse) => void> = [];
+  private lastStateResponse: BaseResponse | null = null;
 
   private constructor() {
     super();
@@ -26,6 +36,7 @@ class SerialManager extends EventEmitter {
     // Load configs asynchronously (don't await in constructor)
     this.loadCommandConfig().catch(console.error);
     this.loadRobotConfig().catch(console.error);
+    this.loadDebugSettings().catch(() => {});
     this.setupCleanupHandlers();
   }
 
@@ -74,6 +85,10 @@ class SerialManager extends EventEmitter {
   }
 
   private forceClosePort() {
+    // Clear simulator state as well
+    if (this.debugSimulated) {
+      this.debugSimulated = false;
+    }
     if (this.serialPort) {
       try {
         this.serialPort.removeAllListeners();
@@ -228,11 +243,157 @@ class SerialManager extends EventEmitter {
     }
   }
 
+  private async loadDebugSettings(): Promise<void> {
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const settingsPath = path.join(process.cwd(), 'config', 'DebugSettings.json');
+      const settingsData = await fs.readFile(settingsPath, 'utf-8');
+      this.debugSettings = JSON.parse(settingsData) as DebugSettings;
+      await this.log('Loaded debug settings');
+    } catch (error) {
+      // Optional file; use defaults if missing
+      this.debugSettings = {
+        delays: {
+          getStateMs: 40,
+          homingSequenceMsPerAxis: 1500,
+          runTestMs: 3000,
+          emergencyStopMs: 20,
+          baseOverheadMs: 5
+        },
+        movement: {
+          degPerSecond: Array(this.robotConfig?.armConfig?.axes ?? 6).fill(90)
+        }
+      };
+      await this.log('Using default debug settings');
+    }
+  }
+
+  private simulateDebugResponse(fullCommand: Command): void {
+    if (!this.debugSettings) return;
+    const commandName = (fullCommand as unknown as { command: string }).command;
+    const params = Object.fromEntries(
+      Object.entries(fullCommand as unknown as Record<string, unknown>)
+        .filter(([key]) => key !== 'type' && key !== 'uuid' && key !== 'command')
+    ) as Record<string, unknown>;
+
+    const baseOverhead = this.debugSettings.delays.baseOverheadMs ?? 0;
+    let delay = baseOverhead;
+
+    if (commandName === 'getState') {
+      delay += this.debugSettings.delays.getStateMs;
+      setTimeout(() => {
+        const response = this.buildStateResponse(fullCommand.uuid, 'getState', 'success', 'State retrieved successfully.');
+        this.dispatchSimulatedResponse(response);
+      }, delay);
+      return;
+    }
+
+    if (commandName === 'setAxisAngle') {
+      const axis = Number(params.axis ?? 0);
+      const target = Number(params.angle ?? 0);
+      const current = this.simAngles[axis] ?? 0;
+      const axes = this.robotConfig?.armConfig?.axes ?? this.simAngles.length;
+      const degPerSec = (this.debugSettings.movement.degPerSecond[axis] ?? 90);
+      const travel = Math.abs(target - current);
+      const travelMs = Math.round((travel / degPerSec) * 1000);
+      delay += travelMs;
+
+      // Schedule movement simulation and then respond
+      setTimeout(() => {
+        this.simAngles[axis] = target;
+        const response = this.buildStateResponse(fullCommand.uuid, 'setAxisAngle', 'success', `Axis ${axis} angle set to ${target} degrees.`);
+        this.dispatchSimulatedResponse(response);
+      }, delay);
+      return;
+    }
+
+    if (commandName === 'homingSequence') {
+      const axis = Number(params.axis ?? -1);
+      const axes = this.robotConfig?.armConfig?.axes ?? this.simAngles.length;
+      const count = axis === -1 ? axes : 1;
+      delay += this.debugSettings.delays.homingSequenceMsPerAxis * count;
+      setTimeout(() => {
+        if (axis === -1) {
+          this.simAngles = this.simAngles.map(() => 0);
+        } else if (axis >= 0 && axis < this.simAngles.length) {
+          this.simAngles[axis] = 0;
+        }
+        const response = this.buildStateResponse(fullCommand.uuid, 'homingSequence', 'success', axis === -1 ? 'Homing all axes.' : `Homing axis ${axis}`);
+        this.dispatchSimulatedResponse(response);
+      }, delay);
+      return;
+    }
+
+    if (commandName === 'runTest') {
+      delay += this.debugSettings.delays.runTestMs;
+      setTimeout(() => {
+        const response = this.buildStateResponse(fullCommand.uuid, 'runTest', 'success', 'Test completed.');
+        this.dispatchSimulatedResponse(response);
+      }, delay);
+      return;
+    }
+
+    if (commandName === 'emergencyStop') {
+      delay += this.debugSettings.delays.emergencyStopMs;
+      setTimeout(() => {
+        const response = this.buildStateResponse(fullCommand.uuid, 'emergencyStop', 'success', 'Emergency stop executed.');
+        this.dispatchSimulatedResponse(response);
+      }, delay);
+      return;
+    }
+
+    // Default immediate success
+    setTimeout(() => {
+      const response = this.buildStateResponse(fullCommand.uuid, commandName, 'success', 'OK');
+      this.dispatchSimulatedResponse(response);
+    }, delay);
+  }
+
+  private buildStateResponse(uuid: string, command: string, status: string, message: string): BaseResponse {
+    const axesState: Record<string, number> = {};
+    const limits: Record<string, { isAtLimit: boolean; limitIndex: number }> = {};
+    const axes = this.robotConfig?.armConfig?.axes ?? this.simAngles.length;
+    for (let i = 0; i < axes; i++) {
+      axesState[String(i)] = this.simAngles[i] ?? 0;
+      limits[String(i)] = { isAtLimit: false, limitIndex: -1 };
+    }
+    const response = {
+      type: 'response',
+      uuid,
+      command,
+      status,
+      message,
+      stateUpdate: {
+        axes: axesState,
+        limits
+      }
+    } as unknown as BaseResponse;
+    return response;
+  }
+
+  private dispatchSimulatedResponse(message: BaseResponse) {
+    const json = JSON.stringify(message);
+    void this.log(`RX: ${json}`);
+    // Resolve waiting maps like a real message
+    this.processMessage(message as unknown as Record<string, unknown>).catch(() => {});
+  }
+
   // Get available serial ports
   public async getAvailablePorts() {
     try {
       const ports = await SerialPort.list();
-      return ports;
+      // Always include a debug simulator port option
+      const debugPort = {
+        path: 'debug://simulated',
+        manufacturer: 'C38Robot Simulator',
+        serialNumber: 'SIM-0001',
+        pnpId: 'SIMULATED',
+        locationId: 'SIM',
+        productId: '0000',
+        vendorId: '0000'
+      };
+      return [...ports, debugPort];
     } catch (error) {
       console.error('Failed to list serial ports:', error);
       throw error;
@@ -242,6 +403,31 @@ class SerialManager extends EventEmitter {
   // Open serial connection
   public async openPort(path: string, baudRate: number = 115200): Promise<boolean> {
     try {
+      // Debug simulator connection
+      if (path.startsWith('debug://')) {
+        // Close any existing connection
+        if (this.serialPort) {
+          await this.closePort();
+        }
+        await this.log(`Connecting to debug simulator at ${path}`);
+        this.debugSimulated = true;
+        await this.loadDebugSettings();
+        // Start simulator engine
+        if (this.robotConfig && this.debugSettings) {
+          SimulatedMicrocontroller.getInstance().connect(
+            this.robotConfig,
+            this.debugSettings,
+            (message) => {
+              void this.log(`RX: ${JSON.stringify(message)}`);
+              void this.processMessage(message as unknown as Record<string, unknown>);
+            }
+          );
+        }
+        this.isConnected = true;
+        this.emit('connectionChanged', true);
+        return true;
+      }
+
       // Always close any existing connection first
       if (this.serialPort) {
         await this.closePort();
@@ -307,6 +493,15 @@ class SerialManager extends EventEmitter {
 
   // Close serial connection
   public async closePort(): Promise<void> {
+    if (this.debugSimulated) {
+      await this.log('Closing debug simulator connection');
+      SimulatedMicrocontroller.getInstance().disconnect();
+      this.debugSimulated = false;
+      this.isConnected = false;
+      this.emit('connectionChanged', false);
+      return;
+    }
+
     if (this.serialPort) {
       await this.log('Closing serial port connection');
       
@@ -365,7 +560,7 @@ class SerialManager extends EventEmitter {
 
   // Send command through serial port
   public async sendCommand(command: Omit<Command, 'uuid' | 'type'>): Promise<Command> {
-    if (!this.serialPort?.isOpen || !this.isConnected) {
+    if (!this.debugSimulated && (!this.serialPort?.isOpen || !this.isConnected)) {
       await this.log('Attempted to send command but port is not open', 'ERROR');
       throw new Error('Serial port is not open');
     }
@@ -398,7 +593,27 @@ class SerialManager extends EventEmitter {
     
     // Log the command
     await this.log(`Sending command: ${fullCommand.command} ${JSON.stringify(command)}`, 'COMMAND');
-    
+
+    if (this.debugSimulated) {
+      // Simulate command delivery and schedule a fake response
+      this.emit('commandSent', fullCommand);
+      SimulatedMicrocontroller.getInstance().sendCommand(fullCommand as Command);
+
+      return new Promise((resolve, reject) => {
+        // Simulate immediate write success
+        setTimeout(() => resolve(fullCommand), 0);
+        // Keep standard timeout to resolve waiting callers
+        const TIMEOUT_MS = 60000;
+        setTimeout(() => {
+          if (this.pendingCommands.has(fullCommand.uuid)) {
+            this.pendingCommands.delete(fullCommand.uuid);
+            void this.log(`Command timeout (debug): ${fullCommand.command}`, 'ERROR');
+            reject(new Error(`Command timeout: ${fullCommand.command}`));
+          }
+        }, TIMEOUT_MS);
+      });
+    }
+
     return new Promise((resolve, reject) => {
       this.serialPort!.write(jsonString, (err?: Error | null) => {
         if (err) {
@@ -486,6 +701,21 @@ class SerialManager extends EventEmitter {
         await this.log(`Received response: ${JSON.stringify(message)}`, 'RESPONSE');
       }
 
+      // Cache last state response for getState
+      if ((message as { command?: string }).command === 'getState' && message.status === 'success') {
+        this.lastStateResponse = message as BaseResponse;
+        // Resolve any coalesced waiters
+        const waiters = [...this.getStateWaiters];
+        this.getStateWaiters = [];
+        for (const waiter of waiters) {
+          try {
+            waiter(this.lastStateResponse);
+          } catch {}
+        }
+        this.getStateInFlight = false;
+        this.currentGetStateCommand = null;
+      }
+
       // Resolve any waiter for this response
       const resolver = this.pendingResponseResolvers.get(message.uuid as string);
       if (resolver) {
@@ -494,6 +724,62 @@ class SerialManager extends EventEmitter {
       }
       this.emit('messageReceived', message as BaseResponse);
     }
+  }
+
+  // Coalesce concurrent getState requests to a single on-wire request
+  public async sendGetStateCoalesced(
+    payload: Omit<Command, 'uuid' | 'type'>,
+    timeoutMs: number = 5000
+  ): Promise<{ command: Command; response: BaseResponse }> {
+    // If there's already a getState in-flight, join it
+    if (this.getStateInFlight && this.currentGetStateCommand) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error('Response timeout: getState'));
+        }, timeoutMs);
+
+        this.getStateWaiters.push((message: BaseResponse) => {
+          clearTimeout(timer);
+          resolve({ command: this.currentGetStateCommand as Command, response: message });
+        });
+      });
+    }
+
+    this.getStateInFlight = true;
+
+    // Send without waiting so we can set up our own resolver
+    const sent = await this.sendCommand(payload);
+    this.currentGetStateCommand = sent;
+
+    const response = await new Promise<BaseResponse>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingResponseResolvers.delete(sent.uuid);
+        this.getStateInFlight = false;
+        this.currentGetStateCommand = null;
+        reject(new Error('Response timeout: getState'));
+      }, timeoutMs);
+
+      this.pendingResponseResolvers.set(sent.uuid, (message: BaseResponse) => {
+        clearTimeout(timer);
+        resolve(message);
+      });
+    });
+
+    this.lastStateResponse = response;
+
+    // Resolve any waiters (if any remain)
+    const waiters = [...this.getStateWaiters];
+    this.getStateWaiters = [];
+    for (const waiter of waiters) {
+      try {
+        waiter(response);
+      } catch {}
+    }
+
+    this.getStateInFlight = false;
+    this.currentGetStateCommand = null;
+
+    return { command: sent, response };
   }
 
   // Get logs
@@ -517,8 +803,26 @@ class SerialManager extends EventEmitter {
 
   // Whether the underlying serialport instance is present and open
   public isPortOpen(): boolean {
+    if (this.debugSimulated) {
+      return true;
+    }
     return !!this.serialPort && this.serialPort.isOpen === true;
   }
 }
 
 export default SerialManager;
+
+// Types
+interface DebugSettings {
+  delays: {
+    getStateMs: number;
+    homingSequenceMsPerAxis: number;
+    runTestMs: number;
+    emergencyStopMs: number;
+    baseOverheadMs?: number;
+  };
+  movement: {
+    degPerSecond: number[];
+  };
+}
+

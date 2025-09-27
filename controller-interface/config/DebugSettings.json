@@ -1,0 +1,12 @@
+{
+    "delays": {
+      "getStateMs": 40,
+      "homingSequenceMsPerAxis": 1500,
+      "runTestMs": 3000,
+      "emergencyStopMs": 20,
+      "baseOverheadMs": 5
+    },
+    "movement": {
+      "degPerSecond": [15, 25, 40, 50, 55, 80]
+    }
+  }

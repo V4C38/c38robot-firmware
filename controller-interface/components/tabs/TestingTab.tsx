@@ -47,7 +47,7 @@ export const TestingTab: React.FC = () => {
     };
   }, []);
 
-  // Fetch logs only when tab is visible
+  // Fetch logs and poll getState only when tab is visible
   useEffect(() => {
     if (!isTabVisible) return;
 
@@ -55,9 +55,20 @@ export const TestingTab: React.FC = () => {
     fetchLogs();
 
     // Then poll every 5 seconds while visible
-    const interval = setInterval(fetchLogs, 5000);
-    return () => clearInterval(interval);
-  }, [isTabVisible]);
+    const logInterval = setInterval(fetchLogs, 5000);
+
+    // While this tab is visible, request state periodically to keep UI updating during tests
+    const stateInterval = setInterval(() => {
+      if (isConnected) {
+        void sendCommand({ command: 'getState' });
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(logInterval);
+      clearInterval(stateInterval);
+    };
+  }, [isTabVisible, isConnected, sendCommand]);
 
   const handleRunTest = async () => {
     if (!isConnected) {
@@ -306,6 +317,12 @@ export const TestingTab: React.FC = () => {
                 <Bug className="w-4 h-4" />
                 Debug Mode: {armState.debugMode ? 'ON' : 'OFF'}
               </button>
+              {/* Debug explanation */}
+              <p className="text-xs text-gray-600 leading-5">
+                When enabled, a simulated device connects on <span className="font-mono">debug://simulated</span>.
+                Commands respond with realistic delays and the arm angles change over time based on
+                <span className="font-mono"> config/DebugSettings.json</span> speeds. Use this to test without hardware.
+              </p>
             </div>
           </div>
 

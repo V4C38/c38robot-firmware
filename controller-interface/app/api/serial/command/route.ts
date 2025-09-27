@@ -8,7 +8,14 @@ export async function POST(request: NextRequest) {
     const command = await request.json() as Omit<Command, 'uuid' | 'type'>;
 
     const serialManager = SerialManager.getInstance();
-    // Send and wait for response so clients can immediately update UI state
+    // For getState, coalesce concurrent requests to avoid flooding the MCU
+    const commandName = (command as unknown as { command: string }).command;
+    if (commandName === 'getState') {
+      const { command: sentCommand, response } = await serialManager.sendGetStateCoalesced(command);
+      return NextResponse.json({ success: true, command: sentCommand, response });
+    }
+
+    // For other commands, wait for their specific response
     const { command: sentCommand, response } = await serialManager.sendCommandAndWait(command);
 
     return NextResponse.json({ success: true, command: sentCommand, response });

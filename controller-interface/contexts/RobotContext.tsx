@@ -87,13 +87,12 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const handleMessageReceived = (response: BaseResponse) => {
       if (response.status === 'success' && 'stateUpdate' in response) {
         const responseCommand = (response as unknown as { command?: string }).command;
-        // Only update current angles from periodic state snapshots
-        if (responseCommand !== 'getState') {
+        // Ignore immediate echo updates from setAxisAngle; rely on periodic getState updates instead
+        if (responseCommand === 'setAxisAngle') {
           return;
         }
         const stateUpdate = response as StateUpdateResponse;
         if (stateUpdate.stateUpdate?.axes) {
-          // Update arm state based on response
           setArmState(prev => {
             const newState = { ...prev };
             Object.entries(stateUpdate.stateUpdate!.axes).forEach(([axis, angle]) => {
@@ -102,7 +101,6 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 newState.joints[axisIndex].currentAngle = angle;
               }
             });
-            // Update limit status if provided
             if (stateUpdate.stateUpdate?.limits) {
               Object.entries(stateUpdate.stateUpdate.limits).forEach(([axis, info]) => {
                 const axisIndex = parseInt(axis);
@@ -114,7 +112,6 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
             return newState;
           });
-
         }
       }
     };
@@ -305,6 +302,22 @@ export const RobotProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       throw error;
     }
   }, [targetAngles]);
+
+  // Auto-connect/disconnect debug simulator based on debugMode
+  useEffect(() => {
+    const debugPortPath = 'debug://simulated';
+    if (armState.debugMode) {
+      if (selectedPort !== debugPortPath || !isConnected) {
+        setSelectedPort(debugPortPath);
+        void connectToPort(debugPortPath, baudRate);
+      }
+    } else {
+      if (selectedPort === debugPortPath && isConnected) {
+        void disconnect();
+        setSelectedPort(null);
+      }
+    }
+  }, [armState.debugMode, selectedPort, isConnected, connectToPort, disconnect, baudRate]);
 
   const value: RobotContextType = {
     isConnected,

@@ -201,9 +201,10 @@ export const AxisControlTab: React.FC = () => {
 
   const handleIntervalChange = (value: string) => {
     const interval = parseFloat(value);
-    if (!isNaN(interval) && interval > 0.1 && interval <= 60) {
-      setUpdateInterval(interval);
-    }
+    if (isNaN(interval)) return;
+    // Clamp to reduce MCU load and avoid jitter during moves
+    const clamped = Math.max(0.5, Math.min(60, interval));
+    setUpdateInterval(clamped);
   };
 
   return (
